@@ -4,8 +4,8 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import dns from "node:dns";
+import authRoutes from "./routes/auth.routes";
 
-// FIX: Work around the Windows DNS issue
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 dotenv.config();
@@ -16,6 +16,8 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
+
+app.use("/api/auth", authRoutes);
 
 app.get("/", (req, res) => {
   res.send("Plant Care Backend is running!");
