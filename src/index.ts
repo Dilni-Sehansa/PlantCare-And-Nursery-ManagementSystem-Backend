@@ -10,6 +10,7 @@ import plantRoutes from "./routes/plant.routes";
 import plantTypeRoutes from "./routes/plantType.routes";
 import orderRoutes from "./routes/order.routes";
 import supplierRoutes from "./routes/supplier.routes";
+import productRoutes from "./routes/product.routes";
 
 
 
@@ -32,6 +33,8 @@ app.use("/api/plant-types", plantTypeRoutes);
 app.use("/api/orders", orderRoutes);
 
 app.use("/api/suppliers", supplierRoutes);
+
+app.use("/api/products", productRoutes);
 
 app.use(
   "/uploads",
