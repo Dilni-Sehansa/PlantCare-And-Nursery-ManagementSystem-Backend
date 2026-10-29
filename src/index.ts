@@ -9,6 +9,7 @@ import authRoutes from "./routes/auth.routes";
 import plantRoutes from "./routes/plant.routes";
 import plantTypeRoutes from "./routes/plantType.routes";
 import orderRoutes from "./routes/order.routes";
+import supplierRoutes from "./routes/supplier.routes";
 
 
 
@@ -29,6 +30,8 @@ app.use("/api/plants", plantRoutes);
 app.use("/api/plant-types", plantTypeRoutes);
 
 app.use("/api/orders", orderRoutes);
+
+app.use("/api/suppliers", supplierRoutes);
 
 app.use(
   "/uploads",

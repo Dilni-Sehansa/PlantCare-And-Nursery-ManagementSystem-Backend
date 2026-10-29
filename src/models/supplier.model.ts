@@ -41,9 +41,22 @@ const suplierSchema = new Schema<ISupplier>(
             unique: true,
             trim: true,
             lowercase: true,
-            match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/,"Enter a valid email address"],
+            match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/,"Enter a valid email address",],
         },
-        
+        address: {
+            type: String,
+            required: true,
+            trim: true
+        },
+        status: {
+            type: String,
+            enum: Object.values(Status),
+            required: true,
+            default: Status.ACTIVE,
+        },
 
-    }
-)
+    },
+    {timestamps: true}
+);
+
+export const SupplierModel = model<ISupplier>("System_Supplier",suplierSchema);
