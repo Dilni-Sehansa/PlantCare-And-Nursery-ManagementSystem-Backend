@@ -567,3 +567,120 @@ export const deletePlant = async (req: Request, res: Response) => {
     });
   }
 };
+//get Low Stock Plants
+export const getLowStockPlants = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const rawThreshold = req.query.threshold ?? "10";
+
+    const threshold = Number(rawThreshold);
+
+    if (
+      typeof rawThreshold !== "string" &&
+      typeof rawThreshold !== "number"
+    ) {
+      return res.status(400).json({
+        message: "Invalid stock threshold",
+      });
+    }
+
+    if (
+      String(rawThreshold).trim() === "" ||
+      !Number.isInteger(threshold) ||
+      threshold < 0
+    ) {
+      return res.status(400).json({
+        message: "Threshold must be a whole number greater than or equal to zero",
+      });
+    }
+
+    const plants = await PlantModel.find({
+      stock: { $lte: threshold },
+    }).sort({ stock: 1 });
+
+    return res.status(200).json({
+      message: "Low stock plants retrieved successfully",
+      data: plants,
+      meta: {
+        threshold,
+        total: plants.length,
+      },
+    });
+  } catch (error) {
+    console.error("Get Low Stock Plants Error:", error);
+
+    return res.status(500).json({
+      message: "Failed to get low stock plants",
+    });
+  }
+};
+
+//update Plant Stock
+export const updatePlantStock = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+  
+    const rawId = req.params.id;
+
+    if (typeof rawId !== "string" || !rawId.trim()) {
+      return res.status(400).json({
+        message: "Invalid plant ID",
+      });
+    }
+
+    const id = rawId.trim().toUpperCase();
+
+    let plant = await PlantModel.findOne({
+      plantId: id,
+    });
+
+    if (!plant && isValidObjectId(rawId.trim())) {
+      plant = await PlantModel.findById(rawId.trim());
+    }
+
+    if (!plant) {
+      return res.status(404).json({
+        message: "Plant not found",
+      });
+    }
+
+    const { stock } = req.body;
+
+    if (
+      stock === undefined ||
+      stock === null ||
+      String(stock).trim() === ""
+    ) {
+      return res.status(400).json({
+        message: "Stock is required",
+      });
+    }
+
+    const parsedStock = Number(stock);
+
+    if (!Number.isInteger(parsedStock) || parsedStock < 0) {
+      return res.status(400).json({
+        message: "Stock must be a whole number greater than or equal to zero",
+      });
+    }
+
+    plant.stock = parsedStock;
+
+    await plant.save();
+
+    return res.status(200).json({
+      message: "Plant stock updated successfully",
+      data: plant,
+    });
+  } catch (error) {
+    console.error("Update Plant Stock Error:", error);
+
+    return res.status(500).json({
+      message: "Failed to update plant stock",
+    });
+  }
+};
