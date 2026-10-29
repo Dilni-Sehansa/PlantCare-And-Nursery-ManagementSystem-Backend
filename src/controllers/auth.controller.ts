@@ -76,6 +76,10 @@ export const login = async (req: Request, res: Response) => {
 
 export const getMyDetails = async (req: AuthRequest, res: Response) => {
   try {
+
+    if (!req.user) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
     const userId = req.user.id;
 
     if (!userId) {

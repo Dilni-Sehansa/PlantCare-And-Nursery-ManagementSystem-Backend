@@ -4,11 +4,15 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import dns from "node:dns";
+import path from "node:path";
 import authRoutes from "./routes/auth.routes";
+import plantRoutes from "./routes/plant.routes";
+import plantTypeRoutes from "./routes/plantType.routes";
 
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
+
 
 dotenv.config();
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -19,15 +23,29 @@ app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
 
+app.use("/api/plants", plantRoutes);
+
+app.use("/api/plant-types", plantTypeRoutes);
+
+app.use(
+  "/uploads",
+  express.static(path.resolve(process.cwd(), "uploads"))
+);
+
+
 app.get("/", (req, res) => {
   res.send("Plant Care Backend is running!");
 });
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(
-      process.env.MONGO_URI as string
-    );
+    const mongoUri = process.env.MONGO_URI;
+    
+    if (!mongoUri) {
+      throw new Error("MONGO_URI is missing in .env");
+    }
+
+    const conn = await mongoose.connect(mongoUri);
 
     console.log(
       `MongoDB Connected Successfully: ${conn.connection.host}`
