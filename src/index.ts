@@ -11,6 +11,8 @@ import plantTypeRoutes from "./routes/plantType.routes";
 import orderRoutes from "./routes/order.routes";
 import supplierRoutes from "./routes/supplier.routes";
 import productRoutes from "./routes/product.routes";
+import stockPurchaseRoutes from "./routes/stockPurchase.routes";
+import internalStockRoutes from "./routes/internalStock.routes";
 
 
 
@@ -35,6 +37,10 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/suppliers", supplierRoutes);
 
 app.use("/api/products", productRoutes);
+
+app.use("/api/stock-purchases", stockPurchaseRoutes);
+
+app.use("/api/internal-stock", internalStockRoutes);
 
 app.use(
   "/uploads",
