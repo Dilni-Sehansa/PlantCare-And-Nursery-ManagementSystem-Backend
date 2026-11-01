@@ -13,6 +13,7 @@ import supplierRoutes from "./routes/supplier.routes";
 import productRoutes from "./routes/product.routes";
 import stockPurchaseRoutes from "./routes/stockPurchase.routes";
 import internalStockRoutes from "./routes/internalStock.routes";
+import productSaleRoutes from "./routes/productSale.routes";
 
 
 
@@ -41,6 +42,8 @@ app.use("/api/products", productRoutes);
 app.use("/api/stock-purchases", stockPurchaseRoutes);
 
 app.use("/api/internal-stock", internalStockRoutes);
+
+app.use("/api/product-sales", productSaleRoutes);
 
 app.use(
   "/uploads",
