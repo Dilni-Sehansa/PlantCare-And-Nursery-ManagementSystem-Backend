@@ -14,7 +14,7 @@ import productRoutes from "./routes/product.routes";
 import stockPurchaseRoutes from "./routes/stockPurchase.routes";
 import internalStockRoutes from "./routes/internalStock.routes";
 import productSaleRoutes from "./routes/productSale.routes";
-
+import internalStockUsageRoutes from "./routes/internalStockUsage.routes";
 
 
 dotenv.config();
@@ -44,6 +44,8 @@ app.use("/api/stock-purchases", stockPurchaseRoutes);
 app.use("/api/internal-stock", internalStockRoutes);
 
 app.use("/api/product-sales", productSaleRoutes);
+
+app.use("/api/internal-stock-usages", internalStockUsageRoutes);
 
 app.use(
   "/uploads",
