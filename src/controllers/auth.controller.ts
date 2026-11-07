@@ -1,27 +1,30 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
-import User from "../models/user.model";
+import {UserModel} from "../models/user.model";
 import { signAccessToken, signRefreshToken } from "../utils/token";
 import { AuthRequest } from "../middleware/auth.middleware";
+import jwt from "jsonwebtoken"
+
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { firstName, lastName, email, phone, password, role } = req.body;
+    const { firstName, lastName, email, phone, password } = req.body;
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await UserModel.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
+    const user = await UserModel.create({
       firstName,
       lastName,
       email,
       phone,
       password: hashedPassword,
-      role: role || "USER",
+      // role: role || "USER",
+      role: "USER",
     });
 
     res.status(201).json({
@@ -44,7 +47,7 @@ export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+    const user = await UserModel.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
@@ -86,7 +89,7 @@ export const getMyDetails = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const user = await User.findById(userId).select("-password");
+    const user = await UserModel.findById(userId).select("-password");
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -99,3 +102,32 @@ export const getMyDetails = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+const JWT_REFRESH_TOKEN = process.env.JWT_REFRESH_SECRET as string
+
+export const getRefreshToken = async(req:Request, res:Response) => {
+  const {refreshToken} = req.body
+  try{
+    if(!refreshToken){
+      return res.status(400).json({message:"Token Not Found !..."})
+    }
+
+    const payload = jwt.verify(refreshToken, JWT_REFRESH_TOKEN)
+    const userId = payload?.sub 
+    const user = await UserModel.findById(userId)
+
+    if(!user){
+      return res.status(403).json({message:"Invalid or Expired Token !..."})
+    }
+
+    const newAccessToken = signAccessToken(user)
+    res.status(200).json({
+      data:{accessToken : newAccessToken}
+    })
+  }
+  catch(error){
+    res.status(403).json({
+      message:"Invalid or Expired Token !..."
+    })
+  }
+}
