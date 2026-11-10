@@ -18,6 +18,93 @@ const findProduct = async (id: string) => {
     return null;
 };
 
+const generateProductId = async (): Promise<string> => {
+  const last = await ProductModel.findOne()
+    .sort({ createdAt: -1 })
+    .select("productId");
+
+  if (!last?.productId) {
+    return "PRD001";
+  }
+
+  const match = String(last.productId).match(/^PRD(\d+)$/i);
+  if (!match) {
+    return "PRD001";
+  }
+
+  const next = Number(match[1]) + 1;
+  return `PRD${String(next).padStart(3, "0")}`;
+};
+
+export const createProduct = async (req: Request, res: Response) => {
+  try {
+    const {
+      productName,
+      category,
+      description,
+      unit,
+      buyingPrice,
+      sellingPrice,
+    } = req.body;
+
+    if (
+      !productName ||
+      !category ||
+      !description ||
+      !unit ||
+      buyingPrice === undefined ||
+      sellingPrice === undefined
+    ) {
+      return res.status(400).json({
+        message: "All fields are required",
+      });
+    }
+
+    if (!Object.values(ProductCategory).includes(category)) {
+      return res.status(400).json({
+        message: "Invalid product category",
+      });
+    }
+
+    const buy = Number(buyingPrice);
+    const sell = Number(sellingPrice);
+
+    if (!Number.isFinite(buy) || buy < 0) {
+      return res.status(400).json({
+        message: "Invalid buying price",
+      });
+    }
+
+    if (!Number.isFinite(sell) || sell < 0) {
+      return res.status(400).json({
+        message: "Invalid selling price",
+      });
+    }
+
+    const productId = await generateProductId();
+
+    const product = await ProductModel.create({
+      productId,
+      productName: String(productName).trim(),
+      category,
+      description: String(description).trim(),
+      unit: String(unit).trim(),
+      buyingPrice: buy,
+      sellingPrice: sell,
+      stock: 0,
+      status: ProductStatus.ACTIVE,
+    });
+
+    return res.status(201).json({
+      message: "Product created successfully",
+      product,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
+};
 
 export const getAllProducts = async (req: Request,res: Response) => {
     try {
