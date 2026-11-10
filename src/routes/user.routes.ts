@@ -5,6 +5,7 @@ import {
   getUserStats,
   getUserById,
   createAdmin,
+  updateAdminDetails,
   updateUserRole,
   updateUserStatus,
 } from "../controllers/user.controller";
@@ -18,6 +19,7 @@ router.get("/", getAllUsers);
 router.get("/stats", getUserStats);
 router.post("/create-admin", createAdmin);
 router.get("/:id", getUserById);
+router.patch("/:id/details", updateAdminDetails);
 router.patch("/:id/role", updateUserRole);
 router.patch("/:id/status", updateUserStatus);
 

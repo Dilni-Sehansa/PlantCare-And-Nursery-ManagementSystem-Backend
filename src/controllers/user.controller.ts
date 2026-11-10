@@ -250,3 +250,100 @@ export const updateUserStatus = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const updateAdminDetails = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { firstName, lastName, email, phone } = req.body;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid User ID",
+      });
+    }
+
+    if (
+      typeof firstName !== "string" ||
+      typeof lastName !== "string" ||
+      typeof email !== "string" ||
+      typeof phone !== "string"
+    ) {
+      return res.status(400).json({
+        message: "First name, last name, email and phone are required",
+      });
+    }
+
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPhone = phone.trim();
+
+    if (!normalizedFirstName || !normalizedLastName) {
+      return res.status(400).json({
+        message: "First name and last name are required",
+      });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return res.status(400).json({
+        message: "Enter a valid email address",
+      });
+    }
+
+    if (!/^0[0-9]{9}$/.test(normalizedPhone)) {
+      return res.status(400).json({
+        message: "Enter a valid 10-digit phone number",
+      });
+    }
+
+    const admin = await UserModel.findOne({ _id: id, role: "ADMIN" });
+
+    if (!admin) {
+      return res.status(404).json({
+        message: "Admin not found",
+      });
+    }
+
+    const existingUser = await UserModel.findOne({
+      _id: { $ne: id },
+      $or: [{ email: normalizedEmail }, { phone: normalizedPhone }],
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        message: "Email or phone number already exists",
+      });
+    }
+
+    admin.firstName = normalizedFirstName;
+    admin.lastName = normalizedLastName;
+    admin.email = normalizedEmail;
+    admin.phone = normalizedPhone;
+    await admin.save();
+
+    res.status(200).json({
+      message: "Admin details updated successfully",
+      user: {
+        id: admin._id,
+        firstName: admin.firstName,
+        lastName: admin.lastName,
+        email: admin.email,
+        phone: admin.phone,
+        role: admin.role,
+        isActive: admin.isActive,
+        createdAt: admin.createdAt,
+        updatedAt: admin.updatedAt,
+      },
+    });
+  } catch (error: any) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        message: "Email or phone number already exists",
+      });
+    }
+
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+};
