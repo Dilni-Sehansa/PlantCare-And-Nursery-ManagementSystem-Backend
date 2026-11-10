@@ -56,6 +56,7 @@ export const createPlant = async (req: Request, res: Response) => {
       price,
       stock,
       careTips,
+      image: imageUrl,
     } = req.body;
 
     if (
@@ -123,7 +124,22 @@ export const createPlant = async (req: Request, res: Response) => {
     }
 
     const plantId = await generatePlantId();
-    const image = req.file ? `/uploads/${req.file.filename}` : "";
+    if (
+      imageUrl !== undefined &&
+      (typeof imageUrl !== "string" ||
+        (imageUrl !== "" && !imageUrl.startsWith("https://")))
+    ) {
+      return res.status(400).json({
+        message: "Invalid plant image URL",
+      });
+    }
+
+    const image =
+      typeof imageUrl === "string"
+        ? imageUrl
+        : req.file
+          ? `/uploads/${req.file.filename}`
+          : "";
 
     const plant = await PlantModel.create({
       plantId,
@@ -394,6 +410,7 @@ export const updatePlant = async (req: Request, res: Response) => {
       price,
       stock,
       careTips,
+      image: imageUrl,
     } = req.body;
 
     if (name !== undefined) {
@@ -513,7 +530,17 @@ export const updatePlant = async (req: Request, res: Response) => {
       plant.careTips = careTips.trim();
     }
 
-    if (req.file) {
+    if (imageUrl !== undefined) {
+      if (
+        typeof imageUrl !== "string" ||
+        (imageUrl !== "" && !imageUrl.startsWith("https://"))
+      ) {
+        return res.status(400).json({
+          message: "Invalid plant image URL",
+        });
+      }
+      plant.image = imageUrl;
+    } else if (req.file) {
       plant.image = `/uploads/${req.file.filename}`;
     }
 

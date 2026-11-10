@@ -1,11 +1,22 @@
 import { Router } from "express";
 import { upload } from "../middleware/upload";
+import {
+  savePlantImage,
+  uploadPlantImage,
+} from "../controllers/plantImage.controller";
 import {createPlant,getAllPlants,getPlantById,updatePlant,deletePlant,getLowStockPlants,
   updatePlantStock,} from "../controllers/plant.controller";
 import { authenticate, adminOnly } from "../middleware/auth.middleware";
 
 const router = Router();
 
+router.post(
+  "/upload-image",
+  authenticate,
+  adminOnly,
+  uploadPlantImage.single("image"),
+  savePlantImage
+);
 router.get("/", getAllPlants);
 router.get("/:id", getPlantById);
 router.get("/low-stock", getLowStockPlants, authenticate, adminOnly);
