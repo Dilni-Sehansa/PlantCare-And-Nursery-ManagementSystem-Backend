@@ -2,6 +2,8 @@
 import { Router, Request, Response } from "express";
 import PlantTypeModel from "../models/plantType.model";
 import { PlantCategory } from "../models/plant.model";
+import { authenticate, adminOnly } from "../middleware/auth.middleware";
+
 
 const router = Router();
 
@@ -43,7 +45,7 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", authenticate, adminOnly, async (req: Request, res: Response) => {
   try {
     const { name, categories } = req.body;
 

@@ -1,16 +1,22 @@
 import { Request, Response, NextFunction } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
+import { UserRole } from "../models/user.model";
 
 export interface AuthRequest extends Request {
   user?: {
     id: string;
-    role: "USER" | "ADMIN"
+    role: UserRole
   };
 }
 interface TokenPayload extends JwtPayload {
   id: string;
-  role: "USER" | "ADMIN";
+  role: UserRole
 }
+const VALID_ROLES: UserRole[] = [
+  "USER",
+  "ADMIN",
+  "SUPER_ADMIN",
+];
 
 export const authenticate = (
 req: AuthRequest,
@@ -51,7 +57,7 @@ req: AuthRequest,
       typeof decoded !== "object" ||
       !decoded ||
       typeof decoded.id !== "string" ||
-      (decoded.role !== "USER" && decoded.role !== "ADMIN")
+      !VALID_ROLES.includes(decoded.role as UserRole)
     ) {
       res.status(401).json({
         message: "Invalid token payload",
@@ -82,7 +88,7 @@ export const adminOnly = (
     return;
   }
 
-  if (authReq.user.role !== "ADMIN") {
+  if (authReq.user.role !== "ADMIN" && authReq.user.role !== "SUPER_ADMIN") {
     res.status(403).json({
       message: "Admin access only",
     });
@@ -90,4 +96,32 @@ export const adminOnly = (
   }
 
   next();
+};
+
+export const allowRoles = (...roles: UserRole[]) => {
+
+  return (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): void => {
+
+    const authReq = req as AuthRequest;
+
+    if (!authReq.user) {
+      res.status(401).json({
+        message: "Please login first",
+      });
+      return;
+    }
+
+    if (!roles.includes(authReq.user.role)) {
+      res.status(403).json({
+        message: "You do not have permission to perform this action",
+      });
+      return;
+    }
+
+    next();
+  };
 };

@@ -7,6 +7,10 @@ dotenv.config();
 const JWT_SECRET = process.env.JWT_SECRET as string;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET as string;
 
+if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
+  throw new Error("JWT secrets are missing in .env");
+}
+
 export const signAccessToken = (user: IUser): string => {
   return jwt.sign(
     {
@@ -22,7 +26,7 @@ export const signAccessToken = (user: IUser): string => {
 export const signRefreshToken = (user: IUser): string => {
   return jwt.sign(
     {
-      id: user._id,
+      id: user._id.toString,
     },
     JWT_REFRESH_SECRET,
     { expiresIn: "7d" }

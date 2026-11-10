@@ -7,10 +7,19 @@ export enum OrderStatus {
   CANCELLED = "CANCELLED",
 }
 
+export enum OrderItemType {
+  PLANT = "PLANT",
+  PRODUCT = "PRODUCT",
+}
+
 export interface IOrderItem {
-  plant: Types.ObjectId;
-  plantId: string;
-  plantName: string;
+  itemType: OrderItemType;
+  plant?: Types.ObjectId;
+  product?: Types.ObjectId;
+  plantId?: string;
+  plantName?: string;
+  productId?: string;
+  productName?: string;
   quantity: number;
   price: number;
 }
@@ -27,19 +36,39 @@ export interface IOrder extends Document {
 
 const orderItemSchema = new Schema<IOrderItem>(
   {
+    itemType: {
+      type: String,
+      enum: Object.values(OrderItemType),
+      required: true,
+      default: OrderItemType.PLANT,
+    },
+
     plant: {
       type: Schema.Types.ObjectId,
       ref: "system_plants",
-      required: true,
     },
+
+    product: {
+      type: Schema.Types.ObjectId,
+      ref: "System_Product",
+    },
+
     plantId: {
       type: String,
-      required: true,
     },
+
     plantName: {
       type: String,
-      required: true,
     },
+
+    productId: {
+      type: String,
+    },
+
+    productName: {
+      type: String,
+    },
+    
     quantity: {
       type: Number,
       required: true,

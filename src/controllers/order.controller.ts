@@ -1,9 +1,32 @@
 import { Response } from "express";
 import { isValidObjectId } from "mongoose";
-import { OrderModel, OrderStatus } from "../models/order.model";
-import { PlantModel } from "../models/plant.model";
+import { OrderModel, OrderStatus, OrderItemType } from "../models/order.model";
+import { PlantModel} from "../models/plant.model";
+import { ProductModel, ProductStatus } from "../models/product.model";
 import { AuthRequest } from "../middleware/auth.middleware";
 
+type OrderItem =
+  | {
+      itemType: OrderItemType.PLANT;
+      plant: any;
+      plantId: string;
+      plantName: string;
+      quantity: number;
+      price: number;
+    }
+  | {
+      itemType: OrderItemType.PRODUCT;
+      product: any;
+      productId: string;
+      productName: string;
+      quantity: number;
+      price: number;
+    };
+type StockChange = {
+  itemType: OrderItemType;
+  itemId: string;
+  quantity: number;
+};
 
 const generateOrderId = async (): Promise<string> => {
   const lastOrder = await OrderModel.findOne()
@@ -30,7 +53,7 @@ const generateOrderId = async (): Promise<string> => {
 // Save order
 export const createOrder = async (req: AuthRequest, res: Response) => {
 
-  const reducedStock: { plantId: string; quantity: number }[] = [];
+  const stockChanges: StockChange[] = [];
 
   try {
     if (!req.user) {
@@ -59,16 +82,37 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const quantityMap = new Map<string, number>();
+    const quantityMap = new Map<string, {
+      itemType: OrderItemType;
+      itemId: string;
+      quantity: number;
+    }>();
 
     for (const item of items) {
-      const plantId = String(item.plantId ?? "").trim().toUpperCase();
-      const quantity = Number(item.quantity);
 
-      if (!plantId) {
+      const itemType = String(
+        item.itemType ?? OrderItemType.PLANT
+      ).toUpperCase() as OrderItemType;
+
+      if (!Object.values(OrderItemType).includes(itemType)) {
         return res.status(400).json({
           success: false,
-          message: "Plant ID is required for every item",
+          message: "Invalid order item type",
+        });
+      }
+
+      const itemId = String(
+        itemType === OrderItemType.PLANT
+          ? item.plantId ?? item.itemId ?? ""
+          : item.productId ?? item.itemId ?? ""
+      ).trim().toUpperCase();
+
+      const quantity = Number(item.quantity);
+
+      if (!itemId) {
+        return res.status(400).json({
+          success: false,
+          message: "Item ID is required for every item",
         });
       }
 
@@ -79,45 +123,97 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      quantityMap.set(
-        plantId,
-        (quantityMap.get(plantId) ?? 0) + quantity
-      );
-    }
+      const key = `${itemType}:${itemId}`;
+      const existingItem = quantityMap.get(key);
 
-    const orderItems = [];
-    let totalAmount = 0;
-
-    for (const [plantId, quantity] of quantityMap) {
-      const plant = await PlantModel.findOne({ plantId });
-
-      if (!plant) {
-        return res.status(404).json({
-          success: false,
-          message: `Plant not found: ${plantId}`,
+      if (existingItem) {
+        existingItem.quantity += quantity;
+      } else {
+        quantityMap.set(key, {
+          itemType,
+          itemId,
+          quantity,
         });
       }
+    }
+      
+    const orderItems: OrderItem[] = [];
 
-      if (plant.stock < quantity) {
-        return res.status(400).json({
-          success: false,
-          message: `Not enough stock for ${plant.name}. Available stock: ${plant.stock}`,
+    let totalAmount = 0;
+
+    for (const item of quantityMap.values()) {
+
+      if (item.itemType === OrderItemType.PLANT) {
+        const plant = await PlantModel.findOne({
+          plantId: item.itemId,
         });
+
+        if (!plant) {
+          return res.status(404).json({
+            success: false,
+            message: `Plant not found: ${item.itemId}`,
+          });
+        }
+
+        if (plant.stock < item.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: `Not enough stock for ${plant.name}. Available stock: ${plant.stock}`,
+          });
       }
 
       orderItems.push({
+        itemType: OrderItemType.PLANT,
         plant: plant._id,
         plantId: plant.plantId,
         plantName: plant.name,
-        quantity,
+        quantity: item.quantity,
         price: plant.price,
       });
 
-      totalAmount += plant.price * quantity;
+      totalAmount += plant.price * item.quantity;
+    }
+
+    else if (item.itemType === OrderItemType.PRODUCT) {
+      const product = await ProductModel.findOne({
+          productId: item.itemId,
+        });
+      
+        if (!product) {
+          return res.status(404).json({
+            success: false,
+            message: `Product not found: ${item.itemId}`,
+          });
+        }
+        if (product.status !== ProductStatus.ACTIVE) {
+          return res.status(400).json({
+            success: false,
+            message: `${product.productName} is currently inactive`,
+          });
+        }
+        if (product.stock < item.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: `Not enough stock for ${product.productName}. Available stock: ${product.stock}`,
+          });
+        }
+
+        orderItems.push({
+          itemType: OrderItemType.PRODUCT,
+          product: product._id,
+          productId: product.productId,
+          productName: product.productName,
+          quantity: item.quantity,
+          price: product.sellingPrice,
+        });
+
+        totalAmount += product.sellingPrice * item.quantity;
+      }
     }
 
     for (const item of orderItems) {
-      const updatedPlant = await PlantModel.findOneAndUpdate(
+      if (item.itemType === OrderItemType.PLANT) {
+        const updatedPlant = await PlantModel.findOneAndUpdate(
         {
           plantId: item.plantId,
           stock: { $gte: item.quantity },
@@ -129,6 +225,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           new: true,
         }
       );
+      
 
       if (!updatedPlant) {
         throw new Error(
@@ -136,10 +233,41 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         );
       }
 
-      reducedStock.push({
-        plantId: item.plantId,
+      stockChanges.push({
+        itemType: OrderItemType.PLANT,
+        itemId: item.plantId,
         quantity: item.quantity,
       });
+    }
+
+    else if (item.itemType === OrderItemType.PRODUCT) {
+
+        const updatedProduct = await ProductModel.findOneAndUpdate(
+          {
+            productId: item.productId,
+            stock: { $gte: item.quantity },
+            status: ProductStatus.ACTIVE,
+          },
+          {
+            $inc: { stock: -item.quantity },
+          },
+          {
+            new: true,
+          }
+        );
+
+        if (!updatedProduct) {
+          throw new Error(
+            `Not enough stock for ${item.productName}. Please try again.`
+          );
+        }
+
+        stockChanges.push({
+          itemType: OrderItemType.PRODUCT,
+          itemId: item.productId,
+          quantity: item.quantity,
+        });
+      }
     }
 
     const orderId = await generateOrderId();
@@ -160,15 +288,27 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       data: order,
     });
   } catch (error: any) {
-    for (const item of reducedStock) {
+    for (const item of stockChanges) {
       try {
+
+        if (item.itemType === OrderItemType.PLANT) {
+
         await PlantModel.updateOne(
-          { plantId: item.plantId },
+          { plantId: item.itemId },
           { $inc: { stock: item.quantity } }
         );
+
+        } else if (item.itemType === OrderItemType.PRODUCT) {
+
+          await ProductModel.updateOne(
+            { productId: item.itemId },
+            { $inc: { stock: item.quantity } }
+          );
+
+        }
       } catch (stockError) {
         console.error(
-          `Stock restoration failed for plant ${item.plantId}:`,
+          `Stock restoration failed for ${item.itemType} ${item.itemId}:`,
           stockError
         );
       }
@@ -318,6 +458,13 @@ export const updateOrderStatus = async (
       });
     }
 
+    if (status === OrderStatus.CANCELLED) {
+      return res.status(400).json({
+        success: false,
+        message: "Please use the cancel order endpoint",
+      });
+    }
+
     const order = await OrderModel.findOne(
       isValidObjectId(id)
         ? { $or: [{ orderId: id.toUpperCase() }, { _id: id }] }
@@ -429,10 +576,24 @@ export const cancelOrder = async (req: AuthRequest, res: Response) => {
 
     try {
       for (const item of cancelledOrder.items) {
-        await PlantModel.updateOne(
+        const itemType = item.itemType ?? OrderItemType.PLANT;
+
+        if (itemType === OrderItemType.PLANT) {
+          await PlantModel.updateOne(
           { _id: item.plant },
           { $inc: { stock: item.quantity } }
         );
+        } else if (itemType === OrderItemType.PRODUCT) {
+          await ProductModel.updateOne(
+            {
+              _id: item.product,
+            },
+            {
+              $inc: { stock: item.quantity },
+            }
+          );
+        }
+        
       }
     } catch (stockError) {
  
@@ -483,6 +644,13 @@ export const deleteOrder = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({
         success: false,
         message: "Order not found",
+      });
+    }
+
+    if (order.status !== OrderStatus.CANCELLED) {
+      return res.status(400).json({
+        success: false,
+        message: "Only cancelled orders can be deleted",
       });
     }
 

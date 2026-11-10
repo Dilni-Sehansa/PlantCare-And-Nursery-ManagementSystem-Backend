@@ -23,7 +23,6 @@ export const register = async (req: Request, res: Response) => {
       email,
       phone,
       password: hashedPassword,
-      // role: role || "USER",
       role: "USER",
     });
 
@@ -50,6 +49,12 @@ export const login = async (req: Request, res: Response) => {
     const user = await UserModel.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password" });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        message: "Your account is deactivated. Please contact the administrator.",
+      });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -94,6 +99,12 @@ export const getMyDetails = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    if (!user.isActive) {
+      return res.status(403).json({
+        message: "Your account is deactivated",
+      });
+    }
+
     res.status(200).json({
       message: "Success",
       user,
@@ -103,21 +114,44 @@ export const getMyDetails = async (req: AuthRequest, res: Response) => {
   }
 };
 
-const JWT_REFRESH_TOKEN = process.env.JWT_REFRESH_SECRET as string
-
 export const getRefreshToken = async(req:Request, res:Response) => {
   const {refreshToken} = req.body
   try{
     if(!refreshToken){
       return res.status(400).json({message:"Token Not Found !..."})
     }
+    const JWT_REFRESH_TOKEN = process.env.JWT_REFRESH_SECRET;
+
+    if (!JWT_REFRESH_TOKEN) {
+      return res.status(500).json({
+        message: "JWT_REFRESH_SECRET is not configured",
+      });
+    }
 
     const payload = jwt.verify(refreshToken, JWT_REFRESH_TOKEN)
+
+    if (
+      typeof payload !== "object" ||
+      !payload ||
+      typeof payload.sub !== "string"
+    ) {
+      return res.status(403).json({
+        message: "Invalid or Expired Token !...",
+      });
+    }
     const userId = payload?.sub 
     const user = await UserModel.findById(userId)
 
     if(!user){
-      return res.status(403).json({message:"Invalid or Expired Token !..."})
+      return res.status(403).json({
+        message:"Invalid or Expired Token !..."
+      })
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        message: "Your account is deactivated",
+      });
     }
 
     const newAccessToken = signAccessToken(user)
