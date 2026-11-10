@@ -24,6 +24,7 @@ export interface IProduct extends Document {
     sellingPrice: number;
     stock: number;
     status: ProductStatus;
+    imageUrl?: string; 
 }
 
 const productSchema = new Schema<IProduct>(
@@ -89,6 +90,11 @@ const productSchema = new Schema<IProduct>(
             enum: Object.values(ProductStatus),
             required: true,
             default: ProductStatus.ACTIVE,
+        },
+        imageUrl: { 
+            type: String,
+            trim: true,
+            default: "",
         },
     },
     {

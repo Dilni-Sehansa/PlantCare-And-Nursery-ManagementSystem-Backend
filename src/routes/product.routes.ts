@@ -2,10 +2,12 @@
 import { Router } from "express";
 import {getAllProducts,getProductById,updateProduct,deactivateProduct,createProduct} from "../controllers/product.controller";
 import {authenticate,adminOnly,} from "../middleware/auth.middleware";
+import { uploadProductImage,saveProductImage,} from "../controllers/productImage.controller";
 
 const router = Router();
 
-router.post("/", authenticate, adminOnly, createProduct);
+router.post("/upload-image", authenticate, adminOnly, uploadProductImage.single("image"), saveProductImage);
+router.post("/create", authenticate, adminOnly, createProduct);
 router.get("/", authenticate, getAllProducts);
 router.get("/:id", authenticate, getProductById);
 router.patch("/:id",authenticate,adminOnly,updateProduct);

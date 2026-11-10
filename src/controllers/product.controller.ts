@@ -45,6 +45,7 @@ export const createProduct = async (req: Request, res: Response) => {
       unit,
       buyingPrice,
       sellingPrice,
+      imageUrl,
     } = req.body;
 
     if (
@@ -81,6 +82,12 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
+    if (imageUrl !== undefined &&(typeof imageUrl !== "string" ||(imageUrl !== "" && !imageUrl.startsWith("https://")))) {
+        return res.status(400).json({
+            message: "Invalid product image URL",
+        });
+    }
+
     const productId = await generateProductId();
 
     const product = await ProductModel.create({
@@ -93,6 +100,7 @@ export const createProduct = async (req: Request, res: Response) => {
       sellingPrice: sell,
       stock: 0,
       status: ProductStatus.ACTIVE,
+      imageUrl: imageUrl || "",
     });
 
     return res.status(201).json({
@@ -232,6 +240,7 @@ export const updateProduct = async (req: Request,res: Response) => {
             status,
             stock,
             productId: requestedProductId,
+            imageUrl,
         } = req.body;
 
         if (
@@ -339,6 +348,19 @@ export const updateProduct = async (req: Request,res: Response) => {
             }
 
             product.status = status as ProductStatus;
+        }
+
+        if (imageUrl !== undefined) {
+            if (
+                typeof imageUrl !== "string" ||
+                (imageUrl !== "" && !imageUrl.startsWith("https://"))
+            ) {
+                return res.status(400).json({
+                    message: "Invalid product image URL",
+                });
+            }
+
+            product.imageUrl = imageUrl;
         }
 
         await product.save();
