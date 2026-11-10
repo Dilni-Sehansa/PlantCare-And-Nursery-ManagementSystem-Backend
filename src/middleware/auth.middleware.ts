@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
-import { UserRole } from "../models/user.model";
+import { UserRole, UserModel } from "../models/user.model";
+import { promises } from "node:dns";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -10,19 +11,14 @@ export interface AuthRequest extends Request {
 }
 interface TokenPayload extends JwtPayload {
   id: string;
-  role: UserRole
 }
-const VALID_ROLES: UserRole[] = [
-  "USER",
-  "ADMIN",
-  "SUPER_ADMIN",
-];
 
-export const authenticate = (
+
+export const authenticate = async(
 req: AuthRequest,
  res: Response,
  next: NextFunction)
-: void => {
+: Promise<void> => {
   const authReq = req as AuthRequest; 
   const authHeader = req.headers.authorization;
 
@@ -56,8 +52,7 @@ req: AuthRequest,
     if (
       typeof decoded !== "object" ||
       !decoded ||
-      typeof decoded.id !== "string" ||
-      !VALID_ROLES.includes(decoded.role as UserRole)
+      typeof decoded.id !== "string"
     ) {
       res.status(401).json({
         message: "Invalid token payload",
@@ -65,7 +60,30 @@ req: AuthRequest,
       return;
     }
 
-    authReq.user = decoded as TokenPayload;
+    const tokenPayload = decoded as TokenPayload;
+
+    const user = await UserModel.findById(tokenPayload.id).select(
+      "_id role isActive"
+    );
+
+    if (!user) {
+      res.status(401).json({
+        message: "User account not found",
+      });
+      return;
+    }
+
+    if (!user.isActive) {
+      res.status(403).json({
+        message: "Your account is deactivated",
+      });
+      return;
+    }
+
+    authReq.user = {
+      id: user._id.toString(),
+      role: user.role,
+    }
     next();
   } catch {
     res.status(401).json({

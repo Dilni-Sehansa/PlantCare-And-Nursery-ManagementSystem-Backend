@@ -14,7 +14,7 @@ if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
 export const signAccessToken = (user: IUser): string => {
   return jwt.sign(
     {
-      id: user._id,
+      id: user._id.toString(),
       email: user.email,
       role: user.role,
     },
@@ -26,7 +26,7 @@ export const signAccessToken = (user: IUser): string => {
 export const signRefreshToken = (user: IUser): string => {
   return jwt.sign(
     {
-      id: user._id.toString,
+      id: user._id.toString(),
     },
     JWT_REFRESH_SECRET,
     { expiresIn: "7d" }

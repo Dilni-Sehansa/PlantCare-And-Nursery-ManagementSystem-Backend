@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import dns from "node:dns";
 import path from "node:path";
 import authRoutes from "./routes/auth.routes";
+import userRoutes from "./routes/user.routes";
 import plantRoutes from "./routes/plant.routes";
 import plantTypeRoutes from "./routes/plantType.routes";
 import orderRoutes from "./routes/order.routes";
@@ -28,6 +29,8 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
+
+app.use("/api/users", userRoutes);
 
 app.use("/api/plants", plantRoutes);
 
