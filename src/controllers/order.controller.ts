@@ -11,6 +11,7 @@ type OrderItem =
       plant: any;
       plantId: string;
       plantName: string;
+      plantImage: string;
       quantity: number;
       price: number;
     }
@@ -19,6 +20,7 @@ type OrderItem =
       product: any;
       productId: string;
       productName: string;
+      productImage: string;
       quantity: number;
       price: number;
     };
@@ -167,6 +169,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         plant: plant._id,
         plantId: plant.plantId,
         plantName: plant.name,
+        plantImage: plant.image || "",
         quantity: item.quantity,
         price: plant.price,
       });
@@ -203,6 +206,7 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           product: product._id,
           productId: product.productId,
           productName: product.productName,
+          productImage: product.imageUrl || "",
           quantity: item.quantity,
           price: product.sellingPrice,
         });
@@ -345,7 +349,7 @@ export const getAllOrders = async (req: AuthRequest, res: Response) => {
 
     const filter: Record<string, any> = {};
 
-    if (req.user.role !== "ADMIN") {
+    if (req.user.role === "USER") {
       filter.user = req.user.id;
     }
 
@@ -416,7 +420,7 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
     const orderUserId = (order.user as any)._id?.toString?.()
       ?? order.user.toString();
 
-    if (req.user.role !== "ADMIN" && orderUserId !== req.user.id) {
+    if (req.user.role === "USER" && orderUserId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: "You are not allowed to view this order",
@@ -531,7 +535,7 @@ export const cancelOrder = async (req: AuthRequest, res: Response) => {
 
     const orderUserId = order.user.toString();
 
-    if (req.user.role !== "ADMIN" && orderUserId !== req.user.id) {
+    if (req.user.role === "USER" && orderUserId !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: "You are not allowed to cancel this order",

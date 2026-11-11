@@ -18,8 +18,10 @@ export interface IOrderItem {
   product?: Types.ObjectId;
   plantId?: string;
   plantName?: string;
+  plantImage?: string;
   productId?: string;
   productName?: string;
+  productImage?: string;
   quantity: number;
   price: number;
 }
@@ -61,12 +63,22 @@ const orderItemSchema = new Schema<IOrderItem>(
       type: String,
     },
 
+    plantImage: {
+      type: String,
+      default: "",
+    },
+
     productId: {
       type: String,
     },
 
     productName: {
       type: String,
+    },
+
+    productImage: {
+      type: String,
+      default: "",
     },
     
     quantity: {
