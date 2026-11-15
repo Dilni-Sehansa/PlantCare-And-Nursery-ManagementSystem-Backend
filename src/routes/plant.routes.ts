@@ -1,9 +1,6 @@
 import { Router } from "express";
 import { upload } from "../middleware/upload";
-import {
-  savePlantImage,
-  uploadPlantImage,
-} from "../controllers/plantImage.controller";
+import {savePlantImage,uploadPlantImage,} from "../controllers/plantImage.controller";
 import {createPlant,getAllPlants,getPlantById,updatePlant,deletePlant,getLowStockPlants,
   updatePlantStock,} from "../controllers/plant.controller";
 import { authenticate, adminOnly } from "../middleware/auth.middleware";
@@ -18,7 +15,7 @@ router.post(
   savePlantImage
 );
 router.get("/", getAllPlants);
-router.get("/low-stock", getLowStockPlants, authenticate, adminOnly, getLowStockPlants, getLowStockPlants);
+router.get("/low-stock", authenticate, adminOnly, getLowStockPlants);
 router.get("/:id", getPlantById);
 router.post("/", authenticate, adminOnly , upload.single("image"), createPlant);
 router.patch("/:id", authenticate, adminOnly, upload.single("image"), updatePlant);
