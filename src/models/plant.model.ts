@@ -30,6 +30,8 @@ export interface IPlant extends Document {
   stock: number;
   image: string;
   careTips: string;
+  isUpcoming: boolean;
+  availableAt: Date | null;
 }
 
 const plantSchema = new Schema<IPlant>(
@@ -112,6 +114,14 @@ const plantSchema = new Schema<IPlant>(
       type: String,
       default: "",
       trim: true,
+    },
+    isUpcoming: {
+      type: Boolean,
+      default: false,
+    },
+    availableAt: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

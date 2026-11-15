@@ -57,6 +57,8 @@ export const createPlant = async (req: Request, res: Response) => {
       stock,
       careTips,
       image: imageUrl,
+      isUpcoming,
+      availableAt,
     } = req.body;
 
     if (
@@ -115,6 +117,31 @@ export const createPlant = async (req: Request, res: Response) => {
       });
     }
 
+    if (
+      isUpcoming !== undefined &&
+      ![true, false, "true", "false"].includes(isUpcoming)
+    ) {
+      return res.status(400).json({
+        message: "Invalid upcoming plant status",
+      });
+    }
+
+    const parsedIsUpcoming = isUpcoming === true || isUpcoming === "true";
+    let parsedAvailableAt: Date | null = null;
+    if (availableAt !== undefined && availableAt !== null && availableAt !== "") {
+      parsedAvailableAt = new Date(availableAt);
+      if (Number.isNaN(parsedAvailableAt.getTime())) {
+        return res.status(400).json({
+          message: "Enter a valid availability date",
+        });
+      }
+    }
+    if (parsedIsUpcoming && !parsedAvailableAt) {
+      return res.status(400).json({
+        message: "An availability date is required for upcoming plants",
+      });
+    }
+
     const plantTypeDocument = await findPlantType(plantType, category);
 
     if (!plantTypeDocument) {
@@ -153,6 +180,8 @@ export const createPlant = async (req: Request, res: Response) => {
       stock: parsedStock,
       image,
       careTips: typeof careTips === "string" ? careTips.trim() : "",
+      isUpcoming: parsedIsUpcoming,
+      availableAt: parsedIsUpcoming ? parsedAvailableAt : null,
     });
 
     return res.status(201).json({
@@ -189,6 +218,7 @@ export const getAllPlants = async (req: Request, res: Response) => {
 
     const skip = (page - 1) * limit;
     const filter: any = {};
+    const now = new Date();
 
     const {
       category,
@@ -199,7 +229,36 @@ export const getAllPlants = async (req: Request, res: Response) => {
       maxPrice,
       search,
       plantId,
+      upcomingOnly,
+      includeUpcoming,
     } = req.query;
+
+    if (
+      includeUpcoming !== undefined &&
+      includeUpcoming !== "true" &&
+      includeUpcoming !== "false"
+    ) {
+      return res.status(400).json({
+        message: "Invalid upcoming plant inclusion filter",
+      });
+    }
+
+    if (upcomingOnly !== undefined) {
+      if (upcomingOnly !== "true" && upcomingOnly !== "false") {
+        return res.status(400).json({
+          message: "Invalid upcoming plant filter",
+        });
+      }
+      if (upcomingOnly === "true") {
+        filter.isUpcoming = true;
+        filter.availableAt = { $gt: now };
+      }
+    } else if (upcomingOnly === "false" || includeUpcoming !== "true") {
+      filter.$or = [
+        { isUpcoming: { $ne: true } },
+        { availableAt: { $lte: now } },
+      ];
+    }
 
     if (plantId !== undefined) {
       if (typeof plantId !== "string" || !plantId.trim()) {
@@ -216,7 +275,17 @@ export const getAllPlants = async (req: Request, res: Response) => {
           message: "Invalid category filter",
         });
       }
-      filter.category = category;
+      if (category === PlantCategory.INDOOR) {
+        filter.category = {
+          $in: [PlantCategory.INDOOR, PlantCategory.INDOOR_OUTDOOR],
+        };
+      } else if (category === PlantCategory.OUTDOOR) {
+        filter.category = {
+          $in: [PlantCategory.OUTDOOR, PlantCategory.INDOOR_OUTDOOR],
+        };
+      } else {
+        filter.category = PlantCategory.INDOOR_OUTDOOR;
+      }
     }
 
     if (plantType !== undefined) {
@@ -411,6 +480,8 @@ export const updatePlant = async (req: Request, res: Response) => {
       stock,
       careTips,
       image: imageUrl,
+      isUpcoming,
+      availableAt,
     } = req.body;
 
     if (name !== undefined) {
@@ -528,6 +599,46 @@ export const updatePlant = async (req: Request, res: Response) => {
         });
       }
       plant.careTips = careTips.trim();
+    }
+
+    if (isUpcoming !== undefined || availableAt !== undefined) {
+      if (
+        isUpcoming !== undefined &&
+        ![true, false, "true", "false"].includes(isUpcoming)
+      ) {
+        return res.status(400).json({
+          message: "Invalid upcoming plant status",
+        });
+      }
+
+      const parsedIsUpcoming =
+        isUpcoming === undefined
+          ? plant.isUpcoming
+          : isUpcoming === true || isUpcoming === "true";
+      let parsedAvailableAt = plant.availableAt ?? null;
+
+      if (availableAt !== undefined) {
+        parsedAvailableAt = null;
+        if (availableAt !== null && availableAt !== "") {
+          parsedAvailableAt = new Date(availableAt);
+          if (Number.isNaN(parsedAvailableAt.getTime())) {
+            return res.status(400).json({
+              message: "Enter a valid availability date",
+            });
+          }
+        }
+      } else if (!parsedIsUpcoming) {
+        parsedAvailableAt = null;
+      }
+
+      if (parsedIsUpcoming && !parsedAvailableAt) {
+        return res.status(400).json({
+          message: "An availability date is required for upcoming plants",
+        });
+      }
+
+      plant.isUpcoming = parsedIsUpcoming;
+      plant.availableAt = parsedIsUpcoming ? parsedAvailableAt : null;
     }
 
     if (imageUrl !== undefined) {

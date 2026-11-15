@@ -157,6 +157,16 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           });
         }
 
+        if (
+          plant.isUpcoming &&
+          (!plant.availableAt || plant.availableAt.getTime() > Date.now())
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: `${plant.name} is not available until its release date`,
+          });
+        }
+
         if (plant.stock < item.quantity) {
           return res.status(400).json({
             success: false,
@@ -221,6 +231,10 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         {
           plantId: item.plantId,
           stock: { $gte: item.quantity },
+          $or: [
+            { isUpcoming: { $ne: true } },
+            { availableAt: { $lte: new Date() } },
+          ],
         },
         {
           $inc: { stock: -item.quantity },

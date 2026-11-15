@@ -18,8 +18,8 @@ router.post(
   savePlantImage
 );
 router.get("/", getAllPlants);
+router.get("/low-stock", getLowStockPlants, authenticate, adminOnly, getLowStockPlants, getLowStockPlants);
 router.get("/:id", getPlantById);
-router.get("/low-stock", getLowStockPlants, authenticate, adminOnly);
 router.post("/", authenticate, adminOnly , upload.single("image"), createPlant);
 router.patch("/:id", authenticate, adminOnly, upload.single("image"), updatePlant);
 router.delete("/:id", authenticate, adminOnly ,deletePlant);
