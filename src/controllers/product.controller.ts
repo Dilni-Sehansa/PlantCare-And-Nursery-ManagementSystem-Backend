@@ -2,6 +2,7 @@
 import { Request, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import {ProductModel,ProductCategory,ProductStatus,} from "../models/product.model";
+import { AuthRequest } from "../middleware/auth.middleware";
 
 
 const findProduct = async (id: string) => {
@@ -34,6 +35,32 @@ const generateProductId = async (): Promise<string> => {
 
   const next = Number(match[1]) + 1;
   return `PRD${String(next).padStart(3, "0")}`;
+};
+
+const isAdminUser = (req: AuthRequest): boolean => {
+    return (
+        req.user?.role === "ADMIN" ||
+        req.user?.role === "SUPER_ADMIN"
+    );
+};
+
+const formatProductResponse = (product: any, isAdmin: boolean) => {
+    const productData = product.toObject();
+
+    if (isAdmin) {
+        return productData;
+    }
+
+    return {
+        _id: productData._id,
+        productId: productData.productId,
+        productName: productData.productName,
+        category: productData.category,
+        description: productData.description,
+        unit: productData.unit,
+        sellingPrice: productData.sellingPrice,
+        imageUrl: productData.imageUrl,
+    };
 };
 
 export const createProduct = async (req: Request, res: Response) => {
@@ -114,11 +141,13 @@ export const createProduct = async (req: Request, res: Response) => {
   }
 };
 
-export const getAllProducts = async (req: Request,res: Response) => {
+export const getAllProducts = async (req: AuthRequest, res: Response) => {
     try {
         const { search, category, status } = req.query;
 
         const filter: any = {};
+
+        const isAdmin = isAdminUser(req);
 
         if (typeof search === "string" && search.trim()) {
             const escapedSearch = search
@@ -150,6 +179,21 @@ export const getAllProducts = async (req: Request,res: Response) => {
 
             filter.category = category;
         }
+        if (isAdmin) {
+            if (typeof status === "string") {
+                if (
+                    !Object.values(ProductStatus).includes(
+                        status as ProductStatus
+                    )
+                ) {
+                    return res.status(400).json({
+                        message: "Invalid product status",
+                    });
+                }
+
+                filter.status = status;
+            }
+        } 
 
         if (typeof status === "string") {
             if (
@@ -163,15 +207,21 @@ export const getAllProducts = async (req: Request,res: Response) => {
             }
 
             filter.status = status;
+        }else {
+            filter.status = ProductStatus.ACTIVE;
         }
 
         const products = await ProductModel.find(filter).sort({
             createdAt: -1,
         });
 
+        const formattedProducts = products.map((product) =>
+            formatProductResponse(product, isAdmin)
+        );
+
         return res.status(200).json({
-            count: products.length,
-            products,
+            count: formattedProducts.length,
+            products: formattedProducts,
         });
     } catch (error) {
         console.error("Get Products Error:", error);
@@ -182,7 +232,7 @@ export const getAllProducts = async (req: Request,res: Response) => {
     }
 };
 
-export const getProductById = async (req: Request,res: Response) => {
+export const getProductById = async (req: AuthRequest, res: Response) => {
     try {
         const productId = req.params.id;
 
@@ -200,8 +250,16 @@ export const getProductById = async (req: Request,res: Response) => {
             });
         }
 
+        const isAdmin = isAdminUser(req);
+
+        if (!isAdmin && product.status !== ProductStatus.ACTIVE) {
+            return res.status(404).json({
+                message: "Product not found or inactive",
+            });
+        }
+
         return res.status(200).json({
-            product,
+            product: formatProductResponse(product, isAdmin),
         });
     } catch (error) {
         console.error("Get Product Error:", error);
