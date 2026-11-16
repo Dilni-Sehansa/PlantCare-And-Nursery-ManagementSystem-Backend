@@ -8,20 +8,84 @@ import jwt from "jsonwebtoken"
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { firstName, lastName, email, phone, password } = req.body;
+    const body = req.body ?? {};
+    const { firstName, lastName, email, phone, password } = body;
 
-    const existingUser = await UserModel.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+    if (
+      typeof firstName !== "string" ||
+      typeof lastName !== "string" ||
+      typeof email !== "string" ||
+      typeof phone !== "string" ||
+      typeof password !== "string"
+    ) {
+      return res.status(400).json({
+        message: "Invalid input data",
+      });
     }
 
+    if (
+      !firstName.trim() ||
+      !lastName.trim() ||
+      !email.trim() ||
+      !phone.trim() ||
+      !password
+    ) {
+      return res.status(400).json({
+        message: "All fields are required",
+      });
+    }
+
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPhone = phone.trim();
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({
+        message: "Enter a valid email address",
+      });
+    }
+
+    const phoneRegex = /^0[0-9]{9}$/;
+
+    if (!phoneRegex.test(normalizedPhone)) {
+      return res.status(400).json({
+        message: "Enter a valid 10-digit phone number",
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        message: "Password must contain at least 8 characters",
+      });
+    }
+
+    const existingUser = await UserModel.findOne({
+      $or: [
+        { email: normalizedEmail },
+        { phone: normalizedPhone },
+      ],
+    });
+    if (existingUser) {
+      if (existingUser.email === normalizedEmail) {
+      return res.status(409).json({ message: "User already exists" });
+    }
+
+    if (existingUser.phone === normalizedPhone) {
+        return res.status(409).json({
+          message: "Phone number already exists",
+        });
+      }
+    }
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await UserModel.create({
-      firstName,
-      lastName,
-      email,
-      phone,
+      firstName: normalizedFirstName,
+      lastName: normalizedLastName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
       password: hashedPassword,
       role: "USER",
     });
@@ -38,13 +102,44 @@ export const register = async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+
+    if (error.code === 11000) {
+      const duplicateField = Object.keys(error.keyPattern || {})[0];
+
+      return res.status(409).json({
+        message:
+          duplicateField === "email"
+            ? "Email already exists"
+            : duplicateField === "phone"
+            ? "Phone number already exists"
+            : "Duplicate data already exists",
+      });
+    }
+
+    if (error.name === "ValidationError" || error.name === "CastError") {
+      return res.status(400).json({
+        message: error.message,
+      });
+    }
+
+    console.error("Registration Error:", error);
+
+    return res.status(500).json({
+      message: "Internal server error during registration",
+    });
   }
 };
 
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
+
+    if (typeof email !== "string" || typeof password !== "string") {
+      return res.status(400).json({
+        message: "Invalid email or password",
+      });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
 
     const user = await UserModel.findOne({ email });
     if (!user) {
