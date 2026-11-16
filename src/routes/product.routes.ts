@@ -1,6 +1,6 @@
 
 import { Router } from "express";
-import {getAllProducts,getProductById,updateProduct,deactivateProduct,createProduct} from "../controllers/product.controller";
+import {getAllProducts,getProductById,updateProduct,deactivateProduct, activateProduct, createProduct} from "../controllers/product.controller";
 import {authenticate,adminOnly,} from "../middleware/auth.middleware";
 import { uploadProductImage,saveProductImage,} from "../controllers/productImage.controller";
 
@@ -12,5 +12,5 @@ router.get("/", authenticate, getAllProducts);
 router.get("/:id", authenticate, getProductById);
 router.patch("/:id",authenticate,adminOnly,updateProduct);
 router.patch("/:id/deactivate",authenticate,adminOnly,deactivateProduct);
-
+router.patch("/:id/activate",authenticate,adminOnly,activateProduct);
 export default router;

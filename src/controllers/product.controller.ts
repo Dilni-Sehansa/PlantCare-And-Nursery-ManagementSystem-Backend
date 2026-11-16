@@ -192,21 +192,9 @@ export const getAllProducts = async (req: AuthRequest, res: Response) => {
                 }
 
                 filter.status = status;
+            }else {
+                filter.status = ProductStatus.ACTIVE;
             }
-        } 
-
-        if (typeof status === "string") {
-            if (
-                !Object.values(ProductStatus).includes(
-                    status as ProductStatus
-                )
-            ) {
-                return res.status(400).json({
-                    message: "Invalid product status",
-                });
-            }
-
-            filter.status = status;
         }else {
             filter.status = ProductStatus.ACTIVE;
         }
@@ -476,6 +464,48 @@ export const deactivateProduct = async (req: Request,res: Response) => {
         });
     } catch (error) {
         console.error("Deactivate Product Error:", error);
+
+        return res.status(500).json({
+            message: "Internal server error",
+        });
+    }
+};
+
+export const activateProduct = async (req: Request, res: Response) => {
+    try {
+        const productId = req.params.id;
+
+        if (typeof productId !== "string") {
+            return res.status(400).json({
+                message: "Invalid product ID",
+            });
+        }
+
+        const product = await findProduct(productId);
+
+        if (!product) {
+            return res.status(404).json({
+                message: "Product not found or invalid product ID",
+            });
+        }
+
+        if (product.status === ProductStatus.ACTIVE) {
+            return res.status(400).json({
+                message: "Product is already active",
+            });
+        }
+
+        product.status = ProductStatus.ACTIVE;
+
+        await product.save();
+
+        return res.status(200).json({
+            message: "Product activated successfully",
+            product,
+        });
+
+    } catch (error) {
+        console.error("Activate Product Error:", error);
 
         return res.status(500).json({
             message: "Internal server error",

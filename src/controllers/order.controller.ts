@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { isValidObjectId } from "mongoose";
+import mongoose,{ isValidObjectId } from "mongoose";
 import { OrderModel, OrderStatus, OrderItemType } from "../models/order.model";
 import { PlantModel} from "../models/plant.model";
 import { ProductModel, ProductStatus } from "../models/product.model";
@@ -30,10 +30,16 @@ type StockChange = {
   quantity: number;
 };
 
-const generateOrderId = async (): Promise<string> => {
-  const lastOrder = await OrderModel.findOne()
+const generateOrderId = async (session?: mongoose.ClientSession): Promise<string> => {
+
+  let query = OrderModel.findOne()
     .sort({ createdAt: -1 })
     .select("orderId");
+
+  if (session) {
+    query = query.session(session);
+  }
+  const lastOrder = await query;
 
   if (!lastOrder) {
     return "O001";
@@ -55,7 +61,8 @@ const generateOrderId = async (): Promise<string> => {
 // Save order
 export const createOrder = async (req: AuthRequest, res: Response) => {
 
-  const stockChanges: StockChange[] = [];
+  const session = await mongoose.startSession();
+
 
   try {
     if (!req.user) {
@@ -138,6 +145,9 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         });
       }
     }
+
+    let createdOrder: any;
+    await session.withTransaction(async () => {
       
     const orderItems: OrderItem[] = [];
 
@@ -146,33 +156,32 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     for (const item of quantityMap.values()) {
 
       if (item.itemType === OrderItemType.PLANT) {
+
         const plant = await PlantModel.findOne({
           plantId: item.itemId,
-        });
+        }).session(session);
 
         if (!plant) {
-          return res.status(404).json({
-            success: false,
-            message: `Plant not found: ${item.itemId}`,
+          throw Object.assign(new Error(`Plant not found: ${item.itemId}`), {
+            statusCode: 404,
           });
         }
 
-        if (
-          plant.isUpcoming &&
+        if(plant.isUpcoming &&
           (!plant.availableAt || plant.availableAt.getTime() > Date.now())
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: `${plant.name} is not available until its release date`,
-          });
+        ){
+          throw Object.assign(
+              new Error(`${plant.name} is not available until its release date`),
+              { statusCode: 400 }
+            );
         }
 
         if (plant.stock < item.quantity) {
-          return res.status(400).json({
-            success: false,
-            message: `Not enough stock for ${plant.name}. Available stock: ${plant.stock}`,
-          });
-      }
+          throw Object.assign(
+            new Error(`Not enough stock for ${plant.name}. Available stock: ${plant.stock}`),
+            { statusCode: 400 }
+          );
+        }
 
       orderItems.push({
         itemType: OrderItemType.PLANT,
@@ -190,25 +199,24 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     else if (item.itemType === OrderItemType.PRODUCT) {
       const product = await ProductModel.findOne({
           productId: item.itemId,
-        });
+        }).session(session);
       
         if (!product) {
-          return res.status(404).json({
-            success: false,
-            message: `Product not found: ${item.itemId}`,
+          throw Object.assign(new Error(`Product not found: ${item.itemId}`), {
+            statusCode: 404,
           });
         }
         if (product.status !== ProductStatus.ACTIVE) {
-          return res.status(400).json({
-            success: false,
-            message: `${product.productName} is currently inactive`,
+          throw Object.assign(new Error(`Product ${product.productName} is not active`), {
+            statusCode: 400,
           });
         }
+
         if (product.stock < item.quantity) {
-          return res.status(400).json({
-            success: false,
-            message: `Not enough stock for ${product.productName}. Available stock: ${product.stock}`,
-          });
+          throw Object.assign(
+            new Error(`Not enough stock for ${product.productName}. Available stock: ${product.stock}`),
+            { statusCode: 400 }
+          );
         }
 
         orderItems.push({
@@ -232,121 +240,92 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
           plantId: item.plantId,
           stock: { $gte: item.quantity },
           $or: [
-            { isUpcoming: { $ne: true } },
-            { availableAt: { $lte: new Date() } },
-          ],
+                { isUpcoming: { $ne: true } },
+                { availableAt: { $lte: new Date() } },
+              ],
+            },
+        {
+          $inc: { stock: -item.quantity },
+        },
+        {
+          new: true,
+          session,
+        }
+      );
+      
+
+      if (!updatedPlant) {
+        throw Object.assign(
+          new Error(
+            `Not enough stock for ${item.plantName}. Please try again.`
+          ),
+          { statusCode: 400 }
+        );
+      }
+    }else if (item.itemType === OrderItemType.PRODUCT) {
+      const updatedProduct = await ProductModel.findOneAndUpdate(
+        {
+          productId: item.productId,
+          stock: { $gte: item.quantity },
+          status: ProductStatus.ACTIVE,
         },
         {
           $inc: { stock: -item.quantity },
         },
         {
           new: true,
+          session,
         }
       );
-      
 
-      if (!updatedPlant) {
-        throw new Error(
-          `Not enough stock for ${item.plantName}. Please try again.`
-        );
-      }
-
-      stockChanges.push({
-        itemType: OrderItemType.PLANT,
-        itemId: item.plantId,
-        quantity: item.quantity,
-      });
-    }
-
-    else if (item.itemType === OrderItemType.PRODUCT) {
-
-        const updatedProduct = await ProductModel.findOneAndUpdate(
-          {
-            productId: item.productId,
-            stock: { $gte: item.quantity },
-            status: ProductStatus.ACTIVE,
-          },
-          {
-            $inc: { stock: -item.quantity },
-          },
-          {
-            new: true,
-          }
-        );
-
-        if (!updatedProduct) {
-          throw new Error(
+      if (!updatedProduct) {
+        throw Object.assign(
+          new Error(
             `Not enough stock for ${item.productName}. Please try again.`
-          );
-        }
-
-        stockChanges.push({
-          itemType: OrderItemType.PRODUCT,
-          itemId: item.productId,
-          quantity: item.quantity,
-        });
+          ),
+          { statusCode: 400 }
+        );
       }
     }
+  }
 
-    const orderId = await generateOrderId();
+  const orderId = await generateOrderId(session);
 
-    const order = await OrderModel.create({
-      orderId,
-      user: req.user.id,
-      items: orderItems,
-      totalAmount,
-      status: OrderStatus.PENDING,
-      shippingAddress: shippingAddress.trim(),
-      notes: typeof notes === "string" ? notes.trim() : "",
+      const order = new OrderModel({
+        orderId,
+        user: req.user!.id,
+        items: orderItems,
+        totalAmount,
+        status: OrderStatus.PENDING,
+        shippingAddress: shippingAddress.trim(),
+        notes: typeof notes === "string" ? notes.trim() : "",
+      });
+
+      await order.save({ session });
+
+      createdOrder = order;
     });
 
     return res.status(201).json({
       success: true,
       message: "Order created successfully",
-      data: order,
+      data: createdOrder,
     });
   } catch (error: any) {
-    for (const item of stockChanges) {
-      try {
-
-        if (item.itemType === OrderItemType.PLANT) {
-
-        await PlantModel.updateOne(
-          { plantId: item.itemId },
-          { $inc: { stock: item.quantity } }
-        );
-
-        } else if (item.itemType === OrderItemType.PRODUCT) {
-
-          await ProductModel.updateOne(
-            { productId: item.itemId },
-            { $inc: { stock: item.quantity } }
-          );
-
-        }
-      } catch (stockError) {
-        console.error(
-          `Stock restoration failed for ${item.itemType} ${item.itemId}:`,
-          stockError
-        );
-      }
-    }
-
-    if (error?.code === 11000) {
+    if (error?.code === 11000) { 
       return res.status(409).json({
         success: false,
-        message:
-          "Duplicate Order ID detected. Please try creating the order again.",
+        message: "Duplicate Order ID detected. Please try creating the order again.",
       });
     }
-
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to create order",
     });
-  }
-};
-
+  }finally {
+    await session.endSession();
+  }};
+ 
 // Get all orders
 export const getAllOrders = async (req: AuthRequest, res: Response) => {
   try {
@@ -524,6 +503,8 @@ export const updateOrderStatus = async (
 
 // Cancel order
 export const cancelOrder = async (req: AuthRequest, res: Response) => {
+
+  const session = await mongoose.startSession();
   try {
     if (!req.user) {
       return res.status(401).json({
@@ -533,110 +514,101 @@ export const cancelOrder = async (req: AuthRequest, res: Response) => {
     }
 
     const id = String(req.params.id);
+    let cancelledOrder: any;
 
-    const order = await OrderModel.findOne(
+    await session.withTransaction(async () => {
+      const order = await OrderModel.findOne(
       isValidObjectId(id)
         ? { $or: [{ orderId: id.toUpperCase() }, { _id: id }] }
         : { orderId: id.toUpperCase() }
-    );
+    ).session(session);
 
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+      throw Object.assign(new Error("Order not found"), { statusCode: 404 });
     }
 
     const orderUserId = order.user.toString();
 
-    if (req.user.role === "USER" && orderUserId !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not allowed to cancel this order",
-      });
+    if (req.user!.role === "USER" && orderUserId !== req.user!.id) {
+      throw Object.assign(new Error("You are not allowed to cancel this order"), { statusCode: 403 });
     }
 
     if (order.status === OrderStatus.CANCELLED) {
-      return res.status(400).json({
-        success: false,
-        message: "Order is already cancelled",
-      });
+      throw Object.assign(
+        new Error("Order is already cancelled"),
+        { statusCode: 400 }
+      );
     }
-
     if (order.status === OrderStatus.DELIVERED) {
-      return res.status(400).json({
-        success: false,
-        message: "Delivered orders cannot be cancelled",
-      });
-    }
-
-    const cancelledOrder = await OrderModel.findOneAndUpdate(
-      {
-        _id: order._id,
-        status: {
-          $nin: [OrderStatus.CANCELLED, OrderStatus.DELIVERED],
-        },
-      },
-      {
-        $set: { status: OrderStatus.CANCELLED },
-      },
-      {
-        new: true,
+        throw Object.assign(
+          new Error("Delivered orders cannot be cancelled"),
+          { statusCode: 400 }
+        );
       }
-    );
+      
+    const updatedOrder = await OrderModel.findOneAndUpdate({
+      _id: order._id,
+      status: {
+        $nin: [OrderStatus.CANCELLED, OrderStatus.DELIVERED],
+      },
+    },
+    {
+      $set: { status: OrderStatus.CANCELLED },
+    },
+    {
+      new: true,
+      session,
+    });
 
-    if (!cancelledOrder) {
-      return res.status(409).json({
-        success: false,
-        message: "Order status has changed. Please refresh and try again.",
-      });
+    if (!updatedOrder) {
+      throw Object.assign(new Error("Order status has changed. Please refresh and try again."), { statusCode: 409 });
     }
 
-    try {
-      for (const item of cancelledOrder.items) {
+    for (const item of updatedOrder.items) {
         const itemType = item.itemType ?? OrderItemType.PLANT;
 
         if (itemType === OrderItemType.PLANT) {
-          await PlantModel.updateOne(
-          { _id: item.plant },
-          { $inc: { stock: item.quantity } }
+          const restoredPlant = await PlantModel.updateOne(
+            {
+              _id: item.plant},
+              {$inc: { stock: item.quantity } },
+            { session }
         );
-        } else if (itemType === OrderItemType.PRODUCT) {
-          await ProductModel.updateOne(
-            {
-              _id: item.product,
-            },
-            {
-              $inc: { stock: item.quantity },
-            }
-          );
-        }
-        
-      }
-    } catch (stockError) {
- 
-      console.error(
-        `Stock restoration failed for order ${cancelledOrder.orderId}:`,
-        stockError
-      );
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "Order was cancelled, but stock restoration failed. Please check the stock manually.",
-      });
-    }
+        if (restoredPlant.matchedCount !== 1){
+          throw new Error(`Plant stock restoration failed for order ${updatedOrder.orderId}`);
+        } 
+        } else if (itemType === OrderItemType.PRODUCT) {
+
+          const restoredProduct = await ProductModel.updateOne(
+            {_id: item.product},
+            {$inc: { stock: item.quantity } },
+            { session }
+          );
+
+          if (restoredProduct.matchedCount !== 1){
+            throw new Error(`Product stock restoration failed for order ${updatedOrder.orderId}`);
+          }
+        }
+      }
+      
+      cancelledOrder = await OrderModel.findById(updatedOrder._id)
+      .session(session);
+    });
 
     return res.status(200).json({
       success: true,
       message: "Order cancelled successfully",
       data: cancelledOrder,
     });
+
   } catch (error: any) {
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to cancel order",
-    });
+  return res.status(error?.statusCode || 500).json({
+    success: false,
+    message: error.message || "Failed to cancel order",
+  });
+  } finally {
+    await session.endSession();
   }
 };
 
