@@ -142,3 +142,87 @@ export const allowRoles = (...roles: UserRole[]) => {
     next();
   };
 };
+
+
+export const optionalAuthenticate = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    next();
+    return;
+  }
+
+  if (!authHeader.startsWith("Bearer ")) {
+    res.status(401).json({
+      message: "Invalid authentication token",
+    });
+    return;
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    res.status(401).json({
+      message: "Invalid authentication token",
+    });
+    return;
+  }
+
+  try {
+    const secret = process.env.JWT_SECRET;
+
+    if (!secret) {
+      res.status(500).json({
+        message: "JWT_SECRET is not configured",
+      });
+      return;
+    }
+
+    const decoded = jwt.verify(token, secret);
+
+    if (
+      typeof decoded !== "object" ||
+      !decoded ||
+      typeof decoded.id !== "string"
+    ) {
+      res.status(401).json({
+        message: "Invalid token payload",
+      });
+      return;
+    }
+
+    const user = await UserModel.findById(decoded.id).select(
+      "_id role isActive"
+    );
+
+    if (!user) {
+      res.status(401).json({
+        message: "User account not found",
+      });
+      return;
+    }
+
+    if (!user.isActive) {
+      res.status(403).json({
+        message: "Your account is deactivated",
+      });
+      return;
+    }
+
+    req.user = {
+      id: user._id.toString(),
+      role: user.role,
+    };
+
+    next();
+  } catch {
+    res.status(401).json({
+      message: "Invalid or expired token",
+    });
+  }
+};
+

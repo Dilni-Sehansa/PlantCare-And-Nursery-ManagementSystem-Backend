@@ -2,6 +2,7 @@ import { Schema, Document, model, Types } from "mongoose";
 
 export enum OrderStatus {
   PENDING = "PENDING",
+  PROCESSING = "PROCESSING",
   CONFIRMED = "CONFIRMED",
   DELIVERED = "DELIVERED",
   CANCELLED = "CANCELLED",
@@ -10,6 +11,21 @@ export enum OrderStatus {
 export enum OrderItemType {
   PLANT = "PLANT",
   PRODUCT = "PRODUCT",
+}
+
+export enum PaymentMethod {
+  CARD = "CARD",
+  BANK_TRANSFER = "BANK_TRANSFER",
+  COD = "COD",
+  CASH_AT_NURSERY = "CASH_AT_NURSERY",
+}
+
+export enum PaymentStatus {
+  PENDING = "PENDING",
+  PAID = "PAID",
+  FAILED = "FAILED",
+  CANCELLED = "CANCELLED",
+  REJECTED = "REJECTED",
 }
 
 export interface IOrderItem {
@@ -34,6 +50,15 @@ export interface IOrder extends Document {
   status: OrderStatus;
   shippingAddress: string;
   notes: string;
+  paymentMethod?: PaymentMethod;
+  paymentStatus: PaymentStatus;
+  paymentSlipUrl?: string;
+  paymentReference?: string;
+  paymentDate?: Date;
+  verifiedBy?: Types.ObjectId;
+  verifiedAt?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const orderItemSchema = new Schema<IOrderItem>(
@@ -143,6 +168,34 @@ const orderSchema = new Schema<IOrder>(
       type: String,
       default: "",
       trim: true,
+    },
+    paymentMethod: {
+      type: String,
+      enum: Object.values(PaymentMethod),
+    },
+    paymentStatus: {
+      type: String,
+      enum: Object.values(PaymentStatus),
+      default: PaymentStatus.PENDING,
+      required: true,
+    },
+    paymentSlipUrl: {
+      type: String,
+      default: "",
+    },
+    paymentReference: {
+      type: String,
+      default: "",
+    },
+    paymentDate: {
+      type: Date,
+    },
+    verifiedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
+    verifiedAt: {
+      type: Date,
     },
   },
   { timestamps: true }

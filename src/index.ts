@@ -2,9 +2,8 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import mongoose from "mongoose";
-import dns from "node:dns";
 import path from "node:path";
+import { connectToDatabase } from "./config/database";
 import authRoutes from "./routes/auth.routes";
 import userRoutes from "./routes/user.routes";
 import plantRoutes from "./routes/plant.routes";
@@ -16,17 +15,61 @@ import stockPurchaseRoutes from "./routes/stockPurchase.routes";
 import internalStockRoutes from "./routes/internalStock.routes";
 import productSaleRoutes from "./routes/productSale.routes";
 import internalStockUsageRoutes from "./routes/internalStockUsage.routes";
+import paymentRoutes from "./routes/payment.routes";
 
 
 dotenv.config();
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+const allowedOrigins = new Set(["http://localhost:5173"]);
+const frontendUrl = process.env.FRONTEND_URL?.trim();
+
+if (process.env.NODE_ENV === "production" && !frontendUrl) {
+  throw new Error("FRONTEND_URL is required in production");
+}
+
+if (frontendUrl) {
+  let frontendOrigin: URL;
+  try {
+    frontendOrigin = new URL(frontendUrl);
+  } catch {
+    throw new Error("FRONTEND_URL must be a valid absolute URL");
+  }
+
+  if (
+    !["http:", "https:"].includes(frontendOrigin.protocol) ||
+    frontendOrigin.username ||
+    frontendOrigin.password ||
+    frontendOrigin.pathname !== "/" ||
+    frontendOrigin.search ||
+    frontendOrigin.hash ||
+    (process.env.NODE_ENV === "production" &&
+      frontendOrigin.protocol !== "https:")
+  ) {
+    throw new Error("FRONTEND_URL must be an HTTP(S) origin without a path");
+  }
+
+  allowedOrigins.add(frontendOrigin.origin);
+}
+
+app.use(cors({ origin: [...allowedOrigins] }));
 app.use(express.json());
 app.use(cookieParser());
+
+app.use(async (_req, res, next) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    console.error(`MongoDB connection failed (${errorName})`);
+    res.status(503).json({
+      success: false,
+      message: "Database unavailable",
+    });
+  }
+});
 
 app.use("/api/auth", authRoutes);
 
@@ -50,41 +93,16 @@ app.use("/api/product-sales", productSaleRoutes);
 
 app.use("/api/internal-stock-usages", internalStockUsageRoutes);
 
+app.use("/api/payments", paymentRoutes);
+
 app.use(
   "/uploads",
   express.static(path.resolve(process.cwd(), "uploads"))
 );
 
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.send("Plant Care Backend is running!");
 });
 
-const connectDB = async () => {
-  try {
-    const mongoUri = process.env.MONGO_URI;
-    
-    if (!mongoUri) {
-      throw new Error("MONGO_URI is missing in .env");
-    }
-
-    const conn = await mongoose.connect(mongoUri);
-
-    console.log(
-      `MongoDB Connected Successfully: ${conn.connection.host}`
-    );
-  } catch (error) {
-    console.error("MongoDB Connection Error:", error);
-    process.exit(1);
-  }
-};
-
-const startServer = async () => {
-  await connectDB();
-
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-};
-
-startServer();
+export = app;

@@ -1,9 +1,17 @@
 import { Response } from "express";
+import PDFDocument from "pdfkit";
 import mongoose,{ isValidObjectId } from "mongoose";
-import { OrderModel, OrderStatus, OrderItemType } from "../models/order.model";
+import {
+  OrderModel,
+  OrderStatus,
+  OrderItemType,
+  PaymentMethod,
+  PaymentStatus,
+} from "../models/order.model";
 import { PlantModel} from "../models/plant.model";
 import { ProductModel, ProductStatus } from "../models/product.model";
 import { AuthRequest } from "../middleware/auth.middleware";
+import { CounterModel } from "../models/counter.model"; 
 
 type OrderItem =
   | {
@@ -31,31 +39,73 @@ type StockChange = {
 };
 
 const generateOrderId = async (session?: mongoose.ClientSession): Promise<string> => {
+  const existingOrderIds = await OrderModel.aggregate([
+    {
+      $match: {
+        orderId: { $regex: /^O\d+$/i },
+      },
+    },
+    {
+      $project: {
+        numericId: {
+          $convert: {
+            input: {
+              $substrCP: [
+                "$orderId",
+                1,
+                { $subtract: [{ $strLenCP: "$orderId" }, 1] },
+              ],
+            },
+            to: "int",
+            onError: 0,
+            onNull: 0,
+          },
+        },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        maxSequence: { $max: "$numericId" },
+      },
+    },
+  ]).session(session ?? null);
 
-  let query = OrderModel.findOne()
-    .sort({ createdAt: -1 })
-    .select("orderId");
+  const maxExistingSequence = existingOrderIds[0]?.maxSequence ?? 0;
 
-  if (session) {
-    query = query.session(session);
+  await CounterModel.updateOne(
+    { _id: "orderId" },
+    {
+      $max: {
+        sequence: maxExistingSequence,
+      },
+    },
+    {
+      upsert: true,
+      session,
+    }
+  );
+
+  const counter = await CounterModel.findOneAndUpdate(
+    { _id: "orderId" },
+    {
+      $inc: {
+        sequence: 1,
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
+      session,
+    }
+  );
+
+  if (!counter) {
+    throw new Error("Failed to generate Order ID");
   }
-  const lastOrder = await query;
 
-  if (!lastOrder) {
-    return "O001";
-  }
-
-  const match = lastOrder.orderId.match(/^O(\d+)$/i);
-
-  if (!match) {
-    throw new Error(
-      "Existing Order ID format is invalid. Please check existing orders."
-    );
-  }
-
-  const nextNumber = Number(match[1]) + 1;
-
-  return `O${String(nextNumber).padStart(3, "0")}`;
+  return `O${String(counter.sequence).padStart(3, "0")}`;
 };
 
 // Save order
@@ -72,7 +122,30 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const { items, shippingAddress, notes } = req.body;
+    const { items, shippingAddress, notes, paymentMethod } = req.body;
+
+    const selectedPaymentMethod =
+      typeof paymentMethod === "string"
+        ? paymentMethod.trim().toUpperCase()
+        : undefined;
+
+    if (!selectedPaymentMethod) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment method is required",
+      });
+    }
+
+    if (
+      !Object.values(PaymentMethod).includes(
+        selectedPaymentMethod as PaymentMethod
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment method",
+      });
+    }
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -98,6 +171,12 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
     }>();
 
     for (const item of items) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return res.status(400).json({
+          success: false,
+          message: "Every order item must be an object",
+        });
+      }
 
       const itemType = String(
         item.itemType ?? OrderItemType.PLANT
@@ -297,6 +376,8 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         items: orderItems,
         totalAmount,
         status: OrderStatus.PENDING,
+        paymentMethod: selectedPaymentMethod as PaymentMethod,
+        paymentStatus: PaymentStatus.PENDING,
         shippingAddress: shippingAddress.trim(),
         notes: typeof notes === "string" ? notes.trim() : "",
       });
@@ -433,10 +514,87 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
 };
 
 // Update order status
-export const updateOrderStatus = async (
-  req: AuthRequest,
-  res: Response
-) => {
+export const getOrderPdf = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Please login first",
+      });
+    }
+
+    const id = String(req.params.id);
+    const order = await OrderModel.findOne(
+      isValidObjectId(id)
+        ? { $or: [{ orderId: id.toUpperCase() }, { _id: id }] }
+        : { orderId: id.toUpperCase() }
+    ).populate("user", "firstName lastName email phone");
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const orderUserId = (order.user as any)._id?.toString?.() ?? order.user.toString();
+
+    if (req.user.role === "USER" && orderUserId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to download this order receipt",
+      });
+    }
+
+    const doc = new PDFDocument({ margin: 40, size: "A4" });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="nurix-order-${order.orderId}.pdf"`
+    );
+
+    doc.pipe(res);
+    doc.fontSize(24).text("NURIX", { align: "center" });
+    doc.moveDown();
+    doc.fontSize(16).text(`Order Number: ${order.orderId}`);
+    const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
+    doc.fontSize(11).text(`Order Date: ${createdAt.toLocaleString()}`);
+    doc.text(`Customer: ${(order.user as any)?.firstName || ""} ${(order.user as any)?.lastName || ""}`.trim());
+    doc.text(`Email: ${(order.user as any)?.email || "N/A"}`);
+    doc.text(`Phone: ${(order.user as any)?.phone || "N/A"}`);
+    doc.text(`Payment Method: ${order.paymentMethod || "N/A"}`);
+    doc.text(`Payment Status: ${order.paymentStatus}`);
+    doc.text(`Order Status: ${order.status}`);
+    doc.moveDown();
+
+    doc.fontSize(14).text("Items");
+    order.items.forEach((item) => {
+      const itemName = item.itemType === OrderItemType.PLANT ? item.plantName : item.productName;
+      const line = `${itemName} x ${item.quantity} @ ${Number(item.price).toFixed(2)} = ${Number(item.price * item.quantity).toFixed(2)}`;
+      doc.fontSize(10).text(line);
+    });
+
+    doc.moveDown();
+    doc.fontSize(14).text(`Total Amount: ${Number(order.totalAmount).toFixed(2)}`);
+    doc.moveDown();
+    doc.fontSize(12).text("Shipping Address:");
+    doc.text(order.shippingAddress);
+    if (order.notes) {
+      doc.moveDown();
+      doc.text(`Notes: ${order.notes}`);
+    }
+
+    doc.end();
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to generate order PDF",
+    });
+  }
+};
+
+export const updateOrderStatus = async (req: AuthRequest,res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({
@@ -475,25 +633,57 @@ export const updateOrderStatus = async (
       });
     }
 
-    if (
-      order.status === OrderStatus.CANCELLED ||
-      order.status === OrderStatus.DELIVERED
-    ) {
+    const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
+      [OrderStatus.PENDING]: [
+        OrderStatus.PROCESSING,
+      ],
+      [OrderStatus.PROCESSING]: [
+        OrderStatus.DELIVERED,
+      ],
+      [OrderStatus.CONFIRMED]: [],
+      [OrderStatus.DELIVERED]: [],
+      [OrderStatus.CANCELLED]: [],
+    };
+    
+    const currentStatus = order.status;
+
+    if (!allowedTransitions[currentStatus].includes(status as OrderStatus)) {
       return res.status(400).json({
         success: false,
-        message: `Cannot update an order that is already ${order.status}`,
+        message: `Cannot change order status from ${currentStatus} to ${status}`,
       });
     }
- 
-    order.status = status as OrderStatus;
-    await order.save();
 
+    const updatedOrder = await OrderModel.findOneAndUpdate(
+      {
+        _id: order._id,
+        status: currentStatus,
+      },
+      {
+        $set: {
+          status: status as OrderStatus,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updatedOrder) {
+      return res.status(409).json({
+        success: false,
+        message: "Order status has changed. Please refresh and try again.",
+      });
+    }
     return res.status(200).json({
       success: true,
       message: "Order status updated successfully",
-      data: order,
-    });
+      data: updatedOrder,
+    }); 
   } catch (error: any) {
+
+    console.error("Update Order Status Error:", error);
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to update order status",
@@ -533,6 +723,12 @@ export const cancelOrder = async (req: AuthRequest, res: Response) => {
       throw Object.assign(new Error("You are not allowed to cancel this order"), { statusCode: 403 });
     }
 
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      throw Object.assign(
+        new Error("Paid orders cannot be cancelled because refunds are not supported"),
+        { statusCode: 400 }
+      );
+    }
     if (order.status === OrderStatus.CANCELLED) {
       throw Object.assign(
         new Error("Order is already cancelled"),
@@ -548,6 +744,7 @@ export const cancelOrder = async (req: AuthRequest, res: Response) => {
       
     const updatedOrder = await OrderModel.findOneAndUpdate({
       _id: order._id,
+      paymentStatus: { $ne: PaymentStatus.PAID },
       status: {
         $nin: [OrderStatus.CANCELLED, OrderStatus.DELIVERED],
       },
@@ -637,6 +834,13 @@ export const deleteOrder = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    if (order.paymentStatus === PaymentStatus.PAID) {
+      return res.status(400).json({
+        success: false,
+        message: "Paid orders cannot be deleted because refunds are not supported",
+      });
+    }
+
     if (order.status !== OrderStatus.CANCELLED) {
       return res.status(400).json({
         success: false,
@@ -644,7 +848,17 @@ export const deleteOrder = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    await OrderModel.deleteOne({ _id: order._id });
+    const deletion = await OrderModel.deleteOne({
+      _id: order._id,
+      paymentStatus: { $ne: PaymentStatus.PAID },
+    });
+
+    if (deletion.deletedCount !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Paid orders cannot be deleted because refunds are not supported",
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -654,6 +868,85 @@ export const deleteOrder = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to delete order",
+    });
+  }
+};
+
+
+export const confirmOrderReceived = async (req: AuthRequest,res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Please login first",
+      });
+    }
+
+    const id = String(req.params.id);
+
+    const order = await OrderModel.findOne(
+      isValidObjectId(id)
+        ? { $or: [{ orderId: id.toUpperCase() }, { _id: id }] }
+        : { orderId: id.toUpperCase() }
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const orderUserId = order.user.toString();
+
+    if (req.user.role !== "USER" || orderUserId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to confirm this order",
+      });
+    }
+
+    if (order.status !== OrderStatus.DELIVERED) {
+      return res.status(400).json({
+        success: false,
+        message: "You can confirm receipt only after the order is delivered",
+      });
+    }
+
+    const updatedOrder = await OrderModel.findOneAndUpdate(
+      {
+        _id: order._id,
+        user: req.user.id,
+        status: OrderStatus.DELIVERED,
+      },
+      {
+        $set: {
+          status: OrderStatus.CONFIRMED,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updatedOrder) {
+      return res.status(409).json({
+        success: false,
+        message: "Order status has changed. Please refresh and try again.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Order receipt confirmed successfully",
+      data: updatedOrder,
+    });
+  } catch (error: any) {
+    console.error("Confirm Order Received Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to confirm order receipt",
     });
   }
 };

@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import {PlantModel,PlantCategory,WaterNeed,Sunlight,} from "../models/plant.model";
 import PlantTypeModel from "../models/plantType.model";
+import { CounterModel } from "../models/counter.model";
+import { storePlantImage } from "./plantImage.controller";
 
 const escapeRegex = (value: string) => {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -26,21 +28,76 @@ const findPlantType = async (plantType: string, category: PlantCategory) => {
   });
 };
 
-const generatePlantId = async () => {
-  const lastPlant = await PlantModel.findOne()
-    .sort({ createdAt: -1 })
-    .select("plantId");
+const generatePlantId = async (): Promise<string> => {
+  const existingPlantIds = await PlantModel.aggregate([
+    {
+      $match: {
+        plantId: { $regex: /^P\d+$/i },
+      },
+    },
+    {
+      $project: {
+        numericId: {
+          $convert: {
+            input: {
+              $substrCP: [
+                "$plantId",
+                1,
+                {
+                  $subtract: [
+                    { $strLenCP: "$plantId" },
+                    1,
+                  ],
+                },
+              ],
+            },
+            to: "int",
+            onError: 0,
+            onNull: 0,
+          },
+        },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        maxSequence: { $max: "$numericId" },
+      },
+    },
+  ]);
 
-  let nextNumber = 1;
+  const maxExistingSequence =
+    existingPlantIds[0]?.maxSequence ?? 0;
 
-  if (lastPlant && lastPlant.plantId) {
-    const match = lastPlant.plantId.match(/P(\d+)/i);
-    if (match) {
-      nextNumber = parseInt(match[1], 10) + 1;
+  await CounterModel.updateOne(
+    { _id: "plantId" },
+    {
+      $max: {
+        sequence: maxExistingSequence,
+      },
+    },
+    { upsert: true }
+  );
+
+  const counter = await CounterModel.findOneAndUpdate(
+    { _id: "plantId" },
+    {
+      $inc: {
+        sequence: 1,
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
     }
+  );
+
+  if (!counter) {
+    throw new Error("Failed to generate Plant ID");
   }
 
-  return `P${String(nextNumber).padStart(3, "0")}`;
+  return `P${String(counter.sequence).padStart(3, "0")}`;
 };
 
 // save
@@ -165,7 +222,7 @@ export const createPlant = async (req: Request, res: Response) => {
       typeof imageUrl === "string"
         ? imageUrl
         : req.file
-          ? `/uploads/${req.file.filename}`
+          ? await storePlantImage(req.file)
           : "";
 
     const plant = await PlantModel.create({
@@ -252,12 +309,12 @@ export const getAllPlants = async (req: Request, res: Response) => {
       if (upcomingOnly === "true") {
         filter.isUpcoming = true;
         filter.availableAt = { $gt: now };
+      } else if (upcomingOnly === "false") { // CHANGED
+        filter.$or = [
+          { isUpcoming: { $ne: true } },
+          { availableAt: { $lte: now } },
+        ];
       }
-    } else if (upcomingOnly === "false" || includeUpcoming !== "true") {
-      filter.$or = [
-        { isUpcoming: { $ne: true } },
-        { availableAt: { $lte: now } },
-      ];
     }
 
     if (plantId !== undefined) {
@@ -429,6 +486,36 @@ export const getPlantById = async (req: Request, res: Response) => {
     if (!plant) {
       return res.status(404).json({
         message: "Plant not found",
+      });
+    }
+
+    const isStillUpcoming =
+      plant.isUpcoming === true &&
+      plant.availableAt !== null &&
+      plant.availableAt !== undefined &&
+      new Date(plant.availableAt).getTime() > Date.now();
+
+      const authReq = req as Request & {
+      user?: {
+        id: string;
+        role: string;
+      };
+    };
+
+    const isAdmin =
+      authReq.user?.role === "ADMIN" ||
+      authReq.user?.role === "SUPER_ADMIN";
+    
+      if (isStillUpcoming && !isAdmin) {
+      return res.status(200).json({
+        message: "Upcoming plant retrieved successfully",
+        data: {
+          plantId: plant.plantId,
+          name: plant.name,
+          image: plant.image,
+          isUpcoming: true,
+          availableAt: plant.availableAt,
+        },
       });
     }
 
@@ -652,7 +739,7 @@ export const updatePlant = async (req: Request, res: Response) => {
       }
       plant.image = imageUrl;
     } else if (req.file) {
-      plant.image = `/uploads/${req.file.filename}`;
+      plant.image = await storePlantImage(req.file);
     }
 
     await plant.save();
@@ -705,6 +792,7 @@ export const deletePlant = async (req: Request, res: Response) => {
     });
   }
 };
+
 //get Low Stock Plants
 export const getLowStockPlants = async (
   req: Request,

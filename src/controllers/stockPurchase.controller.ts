@@ -495,22 +495,21 @@ export const getAllStockPurchases = async (req: Request,res: Response) => {
 
     const filter: any = {};
 
+    if (typeof search === "string" && search.trim()) {
 
-    if (search) {
+    const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const searchRegex = new RegExp(escapedSearch, "i");
 
-      const searchValue = String(search);
-
-      filter.$or = [
-        { purchaseId: { $regex: searchValue, $options: "i" } },
-        { itemName: { $regex: searchValue, $options: "i" } },
-        { sourceName: { $regex: searchValue, $options: "i" } },
-        { supplierId: { $regex: searchValue, $options: "i" } },
-        { productId: { $regex: searchValue, $options: "i" } },
-        { internalItemId: { $regex: searchValue, $options: "i" } }
+    filter.$or = [
+        { purchaseId: searchRegex },
+        { itemName: searchRegex },
+        { sourceName: searchRegex },
+        { supplierId: searchRegex },
+        { productId: searchRegex },
+        { internalItemId: searchRegex }
       ];
     }
-
-
+    
     if (purchaseSource) {
       filter.purchaseSource = purchaseSource;
     }

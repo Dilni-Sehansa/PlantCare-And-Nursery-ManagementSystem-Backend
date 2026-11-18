@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import multer from "multer";
 import { randomUUID } from "crypto";
 import { supabase, SUPABASE_BUCKET } from "../config/supabase";
+import { imageExtensionFor } from "../middleware/file-signature";
 
 const storage = multer.memoryStorage();
 
@@ -10,13 +11,6 @@ export const uploadProductImage = multer({
     storage,
     limits: {
         fileSize: 5 * 1024 * 1024,
-    },
-    fileFilter: (_req, file, callback) => {
-        if (!file.mimetype.startsWith("image/")) {
-            return callback(new Error("Only image files are allowed"));
-        }
-
-        callback(null, true);
     },
 });
 
@@ -31,11 +25,8 @@ export const saveProductImage = async (
             });
         }
 
-        const fileExtension =
-            req.file.originalname.split(".").pop()?.toLowerCase() || "jpg";
-
-        const filePath = `products/${randomUUID()}.${fileExtension}`;
-
+        const fileExtension = imageExtensionFor(req.file.mimetype) || ".jpg";
+        const filePath = `products/${randomUUID()}${fileExtension}`;
         const { error } = await supabase.storage
             .from(SUPABASE_BUCKET)
             .upload(filePath, req.file.buffer, {

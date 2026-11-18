@@ -190,28 +190,25 @@ export const getAllInternalStockUsages = async (req: Request,res: Response) => {
 
         const filter: any = {};
 
-        if (search) {
+        if (typeof search === "string" && search.trim()) {
+
+            const escapedSearch = search
+                .trim()
+                .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+            const searchRegex = new RegExp(escapedSearch, "i");
 
             filter.$or = [
                 {
-                    usageId: {
-                        $regex: search,
-                        $options: "i",
-                    },
+                    usageId: searchRegex,
                 },
 
                 {
-                    internalItemId: {
-                        $regex: search,
-                        $options: "i",
-                    },
+                    internalItemId: searchRegex,
                 },
 
                 {
-                    itemName: {
-                        $regex: search,
-                        $options: "i",
-                    },
+                    itemName: searchRegex,
                 },
             ];
         }

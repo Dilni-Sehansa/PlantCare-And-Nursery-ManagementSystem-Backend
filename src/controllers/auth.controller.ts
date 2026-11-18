@@ -104,19 +104,26 @@ export const register = async (req: Request, res: Response) => {
   } catch (error: any) {
 
     if (error.code === 11000) {
-      const duplicateField = Object.keys(error.keyPattern || {})[0];
+      const duplicateField = Object.keys(error.keyPattern || error.keyValue || {})[0];
+
+      if(duplicateField === "email"){
+        return res.status(409).json({
+          message: "Email already exists",
+        });
+      }
+
+      if(duplicateField === "phone"){
+        return res.status(409).json({
+          message: "Phone number already exists",
+        });
+      }
 
       return res.status(409).json({
-        message:
-          duplicateField === "email"
-            ? "Email already exists"
-            : duplicateField === "phone"
-            ? "Phone number already exists"
-            : "Duplicate data already exists",
+        message: "Duplicate data already exists",
       });
     }
 
-    if (error.name === "ValidationError" || error.name === "CastError") {
+    if(error.name === "ValidationError" || error.name === "CastError"){
       return res.status(400).json({
         message: error.message,
       });
@@ -141,7 +148,7 @@ export const login = async (req: Request, res: Response) => {
     }
     const normalizedEmail = email.trim().toLowerCase();
 
-    const user = await UserModel.findOne({ email });
+    const user = await UserModel.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password" });
     }

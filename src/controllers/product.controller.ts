@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import {ProductModel,ProductCategory,ProductStatus,} from "../models/product.model";
 import { AuthRequest } from "../middleware/auth.middleware";
+import { CounterModel } from "../models/counter.model";
 
 
 const findProduct = async (id: string) => {
@@ -20,21 +21,69 @@ const findProduct = async (id: string) => {
 };
 
 const generateProductId = async (): Promise<string> => {
-  const last = await ProductModel.findOne()
-    .sort({ createdAt: -1 })
-    .select("productId");
+    const existingProductIds = await ProductModel.aggregate([
+        {
+            $match: {
+                productId: { $regex: /^PRD\d+$/i },
+            },
+        },
+        {
+            $project: {
+                numericId: {
+                    $convert: {
+                        input: {
+                            $substrCP: [
+                                "$productId",
+                                3,
+                                { $subtract: [{ $strLenCP: "$productId" }, 3] },
+                            ],
+                        },
+                        to: "int",
+                        onError: 0,
+                        onNull: 0,
+                    },
+                },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                maxSequence: { $max: "$numericId" },
+            },
+        },
+    ]);
 
-  if (!last?.productId) {
-    return "PRD001";
-  }
+    const maxExistingSequence = existingProductIds[0]?.maxSequence ?? 0;
 
-  const match = String(last.productId).match(/^PRD(\d+)$/i);
-  if (!match) {
-    return "PRD001";
-  }
+    await CounterModel.updateOne(
+        { _id: "productId" },
+        {
+            $max: {
+                sequence: maxExistingSequence,
+            },
+        },
+        { upsert: true }
+    );
 
-  const next = Number(match[1]) + 1;
-  return `PRD${String(next).padStart(3, "0")}`;
+    const counter = await CounterModel.findOneAndUpdate(
+        { _id: "productId" },
+        {
+            $inc: {
+                sequence: 1,
+            },
+        },
+        {
+            new: true,
+            upsert: true,
+            setDefaultsOnInsert: true,
+        }
+    );
+
+    if (!counter) {
+        throw new Error("Failed to generate Product ID");
+    }
+
+    return `PRD${String(counter.sequence).padStart(3, "0")}`;
 };
 
 const isAdminUser = (req: AuthRequest): boolean => {
@@ -73,70 +122,120 @@ export const createProduct = async (req: Request, res: Response) => {
       buyingPrice,
       sellingPrice,
       imageUrl,
-    } = req.body;
+    } = req.body ?? {};
 
     if (
-      !productName ||
-      !category ||
-      !description ||
-      !unit ||
-      buyingPrice === undefined ||
-      sellingPrice === undefined
+        typeof productName !== "string" ||
+        !productName.trim() ||
+        typeof description !== "string" ||
+        !description.trim() ||
+        typeof unit !== "string" ||
+        !unit.trim() ||
+        !category
     ) {
       return res.status(400).json({
         message: "All fields are required",
       });
     }
 
-    if (!Object.values(ProductCategory).includes(category)) {
-      return res.status(400).json({
-        message: "Invalid product category",
-      });
-    }
+    if (
+        typeof category !== "string" ||
+        !Object.values(ProductCategory).includes(
+            category as ProductCategory)
+        ) {
+            return res.status(400).json({
+                message: "Invalid product category",
+            });
+        }
 
-    const buy = Number(buyingPrice);
-    const sell = Number(sellingPrice);
+        if (
+            buyingPrice === undefined ||
+            buyingPrice === null ||
+            buyingPrice === "" ||
+            (typeof buyingPrice !== "number" &&
+                typeof buyingPrice !== "string") ||
+            !Number.isFinite(Number(buyingPrice)) ||
+            Number(buyingPrice) < 0
+        ) {
+            return res.status(400).json({
+                message: "Invalid buying price",
+            });
+        }
 
-    if (!Number.isFinite(buy) || buy < 0) {
-      return res.status(400).json({
-        message: "Invalid buying price",
-      });
-    }
+        if (
+            sellingPrice === undefined ||
+            sellingPrice === null ||
+            sellingPrice === "" ||
+            (typeof sellingPrice !== "number" &&
+                typeof sellingPrice !== "string") ||
+            !Number.isFinite(Number(sellingPrice)) ||
+            Number(sellingPrice) < 0
+        ) {
+            return res.status(400).json({
+                message: "Invalid selling price",
+            });
+        }
+        
+        const buy = Number(buyingPrice);
+        const sell = Number(sellingPrice);
 
-    if (!Number.isFinite(sell) || sell < 0) {
-      return res.status(400).json({
-        message: "Invalid selling price",
-      });
-    }
+     if (imageUrl !== undefined && imageUrl !== "") {
+            if (typeof imageUrl !== "string") {
+                return res.status(400).json({
+                    message: "Invalid product image URL",
+                });
+            }
 
-    if (imageUrl !== undefined &&(typeof imageUrl !== "string" ||(imageUrl !== "" && !imageUrl.startsWith("https://")))) {
-        return res.status(400).json({
-            message: "Invalid product image URL",
+            try {
+                const parsedUrl = new URL(imageUrl.trim());
+
+                if (
+                    parsedUrl.protocol !== "https:" ||
+                    !parsedUrl.hostname
+                ) {
+                    return res.status(400).json({
+                        message: "Invalid product image URL",
+                    });
+                }
+            } catch {
+                return res.status(400).json({
+                    message: "Invalid product image URL",
+                });
+            }
+        }
+
+        const productId = await generateProductId();
+
+        const product = await ProductModel.create({
+            productId,
+            productName: productName.trim(),
+            category: category as ProductCategory,
+            description: description.trim(),
+            unit: unit.trim(),
+            buyingPrice: buy,
+            sellingPrice: sell,
+            stock: 0,
+            status: ProductStatus.ACTIVE,
+            imageUrl:
+                typeof imageUrl === "string"
+                    ? imageUrl.trim()
+                    : "",
+        });
+
+        return res.status(201).json({
+            message: "Product created successfully",
+            product,
+        });
+  } catch (error: any) {
+
+    if (error.code === 11000) {
+        return res.status(409).json({
+            message: "Product ID or another unique field already exists",
         });
     }
 
-    const productId = await generateProductId();
-
-    const product = await ProductModel.create({
-      productId,
-      productName: String(productName).trim(),
-      category,
-      description: String(description).trim(),
-      unit: String(unit).trim(),
-      buyingPrice: buy,
-      sellingPrice: sell,
-      stock: 0,
-      status: ProductStatus.ACTIVE,
-      imageUrl: imageUrl || "",
-    });
-
-    return res.status(201).json({
-      message: "Product created successfully",
-      product,
-    });
-  } catch (error: any) {
     return res.status(500).json({
-      message: error.message,
+      message: error.message || "Failed to create product",
     });
   }
 };
@@ -287,7 +386,7 @@ export const updateProduct = async (req: Request,res: Response) => {
             stock,
             productId: requestedProductId,
             imageUrl,
-        } = req.body;
+        } = req.body ??{};
 
         if (
             stock !== undefined ||
@@ -397,16 +496,33 @@ export const updateProduct = async (req: Request,res: Response) => {
         }
 
         if (imageUrl !== undefined) {
-            if (
-                typeof imageUrl !== "string" ||
-                (imageUrl !== "" && !imageUrl.startsWith("https://"))
-            ) {
+
+            if (typeof imageUrl !== "string") {
                 return res.status(400).json({
                     message: "Invalid product image URL",
                 });
             }
 
-            product.imageUrl = imageUrl;
+            if (imageUrl.trim() !== "") {
+                try {
+                    const parsedUrl = new URL(imageUrl.trim());
+
+                    if (
+                        parsedUrl.protocol !== "https:" ||
+                        !parsedUrl.hostname
+                    ) {
+                        return res.status(400).json({
+                            message: "Invalid product image URL",
+                        });
+                    }
+                } catch {
+                    return res.status(400).json({
+                        message: "Invalid product image URL",
+                    });
+                }
+            }
+
+            product.imageUrl = imageUrl.trim();
         }
 
         await product.save();

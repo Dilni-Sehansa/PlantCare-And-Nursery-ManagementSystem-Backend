@@ -3,10 +3,11 @@ import { Router } from "express";
 import {getAllProducts,getProductById,updateProduct,deactivateProduct, activateProduct, createProduct} from "../controllers/product.controller";
 import {authenticate,adminOnly,} from "../middleware/auth.middleware";
 import { uploadProductImage,saveProductImage,} from "../controllers/productImage.controller";
+import { validateImageSignature } from "../middleware/file-signature";
 
 const router = Router();
 
-router.post("/upload-image", authenticate, adminOnly, uploadProductImage.single("image"), saveProductImage);
+router.post("/upload-image", authenticate, adminOnly, uploadProductImage.single("image"), validateImageSignature, saveProductImage); // CHANGED
 router.post("/create", authenticate, adminOnly, createProduct);
 router.get("/", authenticate, getAllProducts);
 router.get("/:id", authenticate, getProductById);

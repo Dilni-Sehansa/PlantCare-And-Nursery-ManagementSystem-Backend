@@ -180,26 +180,14 @@ export const getAllProductSales = async (req: Request,res: Response) => {
 
         const filter: any = {};
 
-        if (search) {
+        if (typeof search === "string" && search.trim()) {
+            const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const searchRegex = new RegExp(escapedSearch, "i");
+            
             filter.$or = [
-                {
-                    saleId: {
-                        $regex: search,
-                        $options: "i",
-                    },
-                },
-                {
-                    productId: {
-                        $regex: search,
-                        $options: "i",
-                    },
-                },
-                {
-                    productName: {
-                        $regex: search,
-                        $options: "i",
-                    },
-                },
+                { saleId: searchRegex },
+                { productId: searchRegex },
+                { productName: searchRegex },
             ];
         }
 

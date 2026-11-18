@@ -32,7 +32,8 @@ const userSchema = new Schema<IUser>(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/,"Enter a valid email address",],
+    match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+        "Enter a valid email address",],
     },
     phone: {
       type: String,
