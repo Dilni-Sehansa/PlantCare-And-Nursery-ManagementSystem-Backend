@@ -10,6 +10,9 @@ export interface IUser extends Document {
   password: string;
   role: UserRole;
   isActive: boolean;
+  isEmailVerified: boolean;
+  emailVerificationToken?: string;
+  emailVerificationExpires?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +57,18 @@ const userSchema = new Schema<IUser>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: true,
+    },
+    emailVerificationToken: {
+      type: String,
+      default: undefined,
+    },
+    emailVerificationExpires: {
+      type: Date,
+      default: undefined,
     },
   },
   {

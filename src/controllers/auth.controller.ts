@@ -4,6 +4,8 @@ import {UserModel} from "../models/user.model";
 import { signAccessToken, signRefreshToken } from "../utils/token";
 import { AuthRequest } from "../middleware/auth.middleware";
 import jwt from "jsonwebtoken"
+import crypto from "crypto";
+import { sendVerificationEmail } from "../service/email.service";
 
 
 export const register = async (req: Request, res: Response) => {
@@ -81,6 +83,13 @@ export const register = async (req: Request, res: Response) => {
     }
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+
+    const hashedVerificationToken = crypto
+      .createHash("sha256")
+      .update(verificationToken)
+      .digest("hex");
+
     const user = await UserModel.create({
       firstName: normalizedFirstName,
       lastName: normalizedLastName,
@@ -88,10 +97,28 @@ export const register = async (req: Request, res: Response) => {
       phone: normalizedPhone,
       password: hashedPassword,
       role: "USER",
+      isEmailVerified: false,
+      emailVerificationToken: hashedVerificationToken,
+      emailVerificationExpires: new Date(Date.now() + 15 * 60 * 1000),
     });
 
+    try {
+      const frontendUrl = process.env.FRONTEND_URL;
+
+      if (!frontendUrl) {
+        throw new Error("FRONTEND_URL is not configured");
+      }
+      
+      const verificationLink = `${frontendUrl}/verify-email?token=${verificationToken}`;
+      
+      await sendVerificationEmail(user.email,user.firstName,verificationLink);
+    } catch (emailError) {
+      await UserModel.deleteOne({ _id: user._id });
+      throw emailError;
+    }
+
     res.status(201).json({
-      message: "User registered successfully",
+      message: "Registration successful. Please check your email to verify your account.",
       user: {
         id: user._id,
         firstName: user.firstName,
@@ -99,6 +126,7 @@ export const register = async (req: Request, res: Response) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        isEmailVerified: user.isEmailVerified,
       },
     });
   } catch (error: any) {
@@ -132,7 +160,7 @@ export const register = async (req: Request, res: Response) => {
     console.error("Registration Error:", error);
 
     return res.status(500).json({
-      message: "Internal server error during registration",
+      message: "Registration failed. Please try again later.",
     });
   }
 };
@@ -162,6 +190,12 @@ export const login = async (req: Request, res: Response) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid email or password" });
+    }
+
+    if (!user.isEmailVerified) {
+      return res.status(403).json({
+        message: "Please verify your email address before logging in.",
+      });
     }
 
     const accessToken = signAccessToken(user);
@@ -268,3 +302,48 @@ export const getRefreshToken = async(req:Request, res:Response) => {
     })
   }
 }
+
+
+export const verifyEmail = async (req: Request, res: Response) => {
+  try {
+    const { token } = req.query;
+
+    if (typeof token !== "string" || !token) {
+      return res.status(400).json({
+        message: "Verification token is required",
+      });
+    }
+
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
+
+    const user = await UserModel.findOne({
+      emailVerificationToken: hashedToken,
+      emailVerificationExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        message: "Invalid or expired verification link",
+      });
+    }
+
+    user.isEmailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+
+    await user.save();
+
+    return res.status(200).json({
+      message: "Email verified successfully. You can now login.",
+    });
+  } catch (error) {
+    console.error("Email Verification Error:", error);
+
+    return res.status(500).json({
+      message: "Email verification failed",
+    });
+  }
+};
