@@ -2,7 +2,11 @@
   "name": "plant-care-management-system-backend",
   "version": "1.0.0",
   "description": "",
+<<<<<<< HEAD
   "main": "dist/src/index.js",
+=======
+  "main": "index.js",
+>>>>>>> b9fc9e198757d994e881fab88b1b3f7ec739759a
   "type": "commonjs",
   "scripts": {
     "test": "tsx --test src/config/database.test.ts",
